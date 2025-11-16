@@ -12,6 +12,12 @@ bash Anaconda3-2024.10-1-Linux-x86_64.sh -b
 source ~/anaconda3/bin/activate
 ~/anaconda3/bin/conda init
 
+conda create -n seppo2 python==3.12
+conda activate seppo2
+bash scripts/install_vllm_sglang_mcore.sh
+pip install --no-deps -e .
+
+
 conda env create -f environment.yml -n seppo1
 conda activate seppo1
 pip install flash-attn==2.8.3 --no-build-isolation
