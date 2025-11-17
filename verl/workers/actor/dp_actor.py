@@ -145,14 +145,15 @@ class DataParallelPPOActor(BasePPOActor):
 
                 mod.a_norm = act_in.float().norm(dim=0) / math.sqrt(act_in.shape[0])
                 mod.g_norm = g_out.float().norm(dim=0) / math.sqrt(g_out.shape[0])
-                mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
-                mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
+                #mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
+                #mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
 
-                if self.testing:
-                    print(f"mod.a_norm: {mod.a_norm}")
-                    print(f"mod.g_norm: {mod.g_norm}")
-                    print(f"mod.a_scaling: {mod.a_scaling}")
-                    print(f"mod.g_scaling: {mod.g_scaling}")
+                #if self.testing:
+                #    if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
+                #        print(f"mod.a_norm: {mod.a_norm}")
+                #        print(f"mod.g_norm: {mod.g_norm}")
+                #        print(f"mod.a_scaling: {mod.a_scaling}")
+                #        print(f"mod.g_scaling: {mod.g_scaling}")
 
             # Parameter hooks to allow assigning or scaling gradients for weight and bias
             def _make_weight_hook(mod):
@@ -613,6 +614,36 @@ class DataParallelPPOActor(BasePPOActor):
 
                     micro_batch_metrics["actor/pg_loss"] = pg_loss.detach().item() * loss_scale_factor
                     append_to_dict(metrics, micro_batch_metrics)
+
+                    if self.testing:
+                        break
+
+                ################################################################################
+                # Optional: print per-layer Linear parameter grads (unflattened shapes) before optimizer step
+                # Prints only on rank 0 to avoid log spam
+                if self.testing:
+                    if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
+                        base_module = getattr(self.actor_module, "module", getattr(self.actor_module, "_fsdp_wrapped_module", self.actor_module))
+                        for lname, lmod in base_module.named_modules():
+                            if isinstance(lmod, nn.Linear):
+                                for pname, p in lmod.named_parameters(recurse=False):
+                                    g = p.grad
+                                    if g is None:
+                                        continue
+                                    # Handle DTensor grads (FSDP2) by materializing full tensor for shape/norm
+                                    if isinstance(g, DTensor):
+                                        try:
+                                            g_full = g.full_tensor()
+                                            shape = tuple(g_full.shape)
+                                            gnorm = g_full.norm().item()
+                                        except Exception:
+                                            shape = tuple(g.shape)
+                                            gnorm = float("nan")
+                                    else:
+                                        shape = tuple(g.shape)
+                                        gnorm = g.norm().item()
+                                    print(f"[actor grad] {lname}.{pname}: shape={shape}, norm={gnorm:.4e}")
+                ################################################################################
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
