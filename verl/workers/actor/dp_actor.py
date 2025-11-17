@@ -684,9 +684,10 @@ class DataParallelPPOActor(BasePPOActor):
 
                                 scale = 0.0
                                 for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
-                                    row_scale = g_norm[sl[0]].to(device=g_local.device, dtype=g_local.dtype)
-                                    col_scale = a_norm[sl[1]].to(device=g_local.device, dtype=g_local.dtype)
-                                    scale += row_scale[:, None] * col_scale[None, :]
+                                    row_scale = g_norm[sl[0]].to(device=g_local.device, dtype=g_local.dtype) ** 2
+                                    col_scale = a_norm[sl[1]].to(device=g_local.device, dtype=g_local.dtype) ** 2
+                                    scale += row_scale[:, None] * col_scale[None, :] / len(lmod.g_norms)
+                                scale = scale.sqrt()
 
                                 lmod.g_norms.clear()
                                 lmod.a_norms.clear()
