@@ -23,7 +23,7 @@ import os
 import torch
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DTensor, Replicate
 
 import verl.utils.torch_functional as verl_F
 from verl import DataProto
@@ -31,6 +31,7 @@ from verl.trainer.ppo.core_algos import agg_loss, get_policy_loss_fn, kl_penalty
 from verl.utils.attention_utils import index_first_axis, pad_input, rearrange, unpad_input
 from verl.utils.device import get_device_id, get_device_name
 from verl.utils.fsdp_utils import FSDPModule, fsdp2_clip_grad_norm_
+import torch.distributed as dist
 from verl.utils.profiler import GPUMemoryLogger
 from verl.utils.py_functional import append_to_dict
 from verl.utils.seqlen_balancing import prepare_dynamic_batch, restore_dynamic_batch
@@ -91,6 +92,8 @@ class DataParallelPPOActor(BasePPOActor):
 
         self.seppo = self.config.get("use_seppo", False)
         self.testing = self.config.get("seppo_testing", False)
+        # When enabled, gather and print full unsharded gradients for Linear params
+        self.seppo_full_grad = self.config.get("seppo_full_grad", False)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -619,30 +622,48 @@ class DataParallelPPOActor(BasePPOActor):
                         break
 
                 ################################################################################
-                # Optional: print per-layer Linear parameter grads (unflattened shapes) before optimizer step
-                # Prints only on rank 0 to avoid log spam
-                if self.testing:
-                    if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
-                        base_module = getattr(self.actor_module, "module", getattr(self.actor_module, "_fsdp_wrapped_module", self.actor_module))
-                        for lname, lmod in base_module.named_modules():
-                            if isinstance(lmod, nn.Linear):
-                                for pname, p in lmod.named_parameters(recurse=False):
-                                    g = p.grad
-                                    if g is None:
-                                        continue
-                                    # Handle DTensor grads (FSDP2) by materializing full tensor for shape/norm
+                # Optional: dump per-layer Linear parameter grads before optimizer step
+                # If seppo_full_grad=True, gather full unsharded gradients (DTensor -> Replicate) on ALL ranks
+                # and print only on rank 0. Otherwise, print a global L2 norm summary without all-gather.
+                if self.testing and dist.is_available() and dist.is_initialized():
+                    base_module = getattr(
+                        self.actor_module, "module", getattr(self.actor_module, "_fsdp_wrapped_module", self.actor_module)
+                    )
+                    for lname, lmod in base_module.named_modules():
+                        if isinstance(lmod, nn.Linear):
+                            for pname, p in lmod.named_parameters(recurse=False):
+                                g = p.grad
+                                if g is None:
+                                    continue
+                                shape = tuple(p.shape)  # global, unsharded param shape
+                                if self.seppo_full_grad:
+                                    # Gather full unsharded grad on ALL ranks by redistributing to Replicate
                                     if isinstance(g, DTensor):
                                         try:
-                                            g_full = g.full_tensor()
-                                            shape = tuple(g_full.shape)
-                                            gnorm = g_full.norm().item()
+                                            g_rep = g.redistribute(g.device_mesh, placements=[Replicate()])
+                                            g_full = g_rep.to_local()  # replicated: local tensor is the full grad
                                         except Exception:
-                                            shape = tuple(g.shape)
-                                            gnorm = float("nan")
+                                            # Fallback to all-gather via full_tensor on ALL ranks
+                                            g_full = g.full_tensor()
                                     else:
-                                        shape = tuple(g.shape)
-                                        gnorm = g.norm().item()
-                                    print(f"[actor grad] {lname}.{pname}: shape={shape}, norm={gnorm:.4e}")
+                                        g_full = g
+                                    if dist.get_rank() == 0:
+                                        # Print the entire unsharded gradient tensor (can be very large)
+                                        print(f"[actor grad full] {lname}.{pname}: shape={shape}\n{g_full.detach().cpu()}")
+                                else:
+                                    # Summary only: global L2 norm via all_reduce of local squares
+                                    if isinstance(g, DTensor):
+                                        try:
+                                            g_local = g.to_local()
+                                            local_sq = (g_local.float() * g_local.float()).sum()
+                                            dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
+                                            gnorm = local_sq.sqrt().item()
+                                        except Exception:
+                                            gnorm = g.to_local().float().norm().item()
+                                    else:
+                                        gnorm = g.float().norm().item()
+                                    if dist.get_rank() == 0:
+                                        print(f"[actor grad] {lname}.{pname}: shape={shape}, norm={gnorm:.4e}")
                 ################################################################################
 
                 grad_norm = self._optimizer_step()
