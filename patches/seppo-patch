@@ -1,0 +1,163 @@
+diff --git a/verl/workers/actor/dp_actor.py b/verl/workers/actor/dp_actor.py
+index f3889898..3f16c78e 100644
+--- a/verl/workers/actor/dp_actor.py
++++ b/verl/workers/actor/dp_actor.py
+@@ -349,7 +349,78 @@ class DataParallelPPOActor(BasePPOActor):
+ 
+ 
+     def install_seppo_hooks(self):
+-        pass
++        """Install SEPPO hooks that
++        - store forward activations (act_in) per Linear layer
++        - compute a per-layer scalar from act_in and backward grad_out in a full backward hook
++        - use that scalar to scale the parameter gradients via param hooks
++
++        This is lightweight and safe under FSDP: scaling is applied on sharded grads.
++        """
++        self.linear_modules = {n: sub for n, sub in self.actor_module.named_modules() if isinstance(sub, nn.Linear)}
++        # Map original params to their owning linear module for quick lookup
++        self._seppo_param_to_module = {}
++        for _, m in self.linear_modules.items():
++            if hasattr(m, "weight") and isinstance(m.weight, torch.nn.Parameter):
++                self._seppo_param_to_module[m.weight] = m
++            if hasattr(m, "bias") and isinstance(m.bias, torch.nn.Parameter) and m.bias is not None:
++                self._seppo_param_to_module[m.bias] = m
++
++        for lname, lmod in self.linear_modules.items():
++            # storage on module
++            lmod._seppo_act_in = None
++            lmod._seppo_scale = 1.0
++
++            # Forward hook to capture input activations
++            def _fwd_hook(mod, inputs, output):
++                in_tensor = inputs[0] if isinstance(inputs, (tuple, list)) else inputs
++                try:
++                    mod._seppo_act_in = in_tensor.detach()
++                except Exception:
++                    mod._seppo_act_in = None
++
++            # Full backward hook to compute a scalar using act_in and grad_out
++            def _bwd_hook(mod, grad_input, grad_output):
++                act_in = mod._seppo_act_in
++                g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
++
++                # Explicitly remove a leading singleton (e.g., [1, T, D] -> [T, D])
++                if act_in.dim() >= 3 and act_in.size(0) == 1:
++                    act_in = act_in[0]
++                if g_out.dim() >= 3 and g_out.size(0) == 1:
++                    g_out = g_out[0]
++
++                non0 = self.mcb_advantages != 0
++                act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None]
++                g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
++
++                mod.a_norm = act_in.float().norm(dim=0) / math.sqrt(act_in.shape[0])
++                mod.g_norm = g_out.float().norm(dim=0) / math.sqrt(g_out.shape[0])
++                mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
++                mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
++
++            # Parameter hooks to allow assigning or scaling gradients for weight and bias
++            def _make_weight_hook(mod):
++                def _hook(grad):
++                    grad = mod.g_scaling[:, None] * mod.a_scaling[None, :] * grad
++                    return grad
++                return _hook
++
++            def _make_bias_hook(mod):
++                def _hook(grad):
++                    grad = mod.g_scaling * grad
++                    return grad
++                return _hook
++
++            lmod.register_forward_hook(_fwd_hook)
++            lmod.register_full_backward_hook(_bwd_hook)
++
++
++            # the hooks below don't work with FSDP
++            # Register separate hooks for weight and bias to access module context
++            #if hasattr(lmod, "weight") and lmod.weight is not None and lmod.weight.requires_grad:
++            #    lmod.weight.register_hook(_make_weight_hook(lmod))
++            #if hasattr(lmod, "bias") and lmod.bias is not None and lmod.bias.requires_grad:
++            #    lmod.bias.register_hook(_make_bias_hook(lmod))
+ 
+ 
+ 
+@@ -967,6 +1038,14 @@ class DataParallelPPOActor(BasePPOActor):
+ 
+                     ################################################################################
+ 
++                    if self.seppo:
++                        attention_mask = model_inputs["attention_mask"]
++                        advantages_w_prompt = torch.zeros_like(attention_mask)
++                        advantages_w_prompt[:, -advantages.shape[1]:] = advantages
++                        self.mcb_advantages = self.flatten_response_window(advantages_w_prompt, attention_mask)
++
++                    ################################################################################
++
+                     entropy_coeff = self.config.entropy_coeff
+                     loss_agg_mode = self.config.loss_agg_mode
+ 
+@@ -1018,11 +1097,60 @@ class DataParallelPPOActor(BasePPOActor):
+                     else:
+                         loss = policy_loss / self.gradient_accumulation
+ 
+-                    if self.pre_optimizer_gradnorm_adjustment:
+-                        loss = loss * self.pre_optimizer_gradnorm_adjustment
+-
+                     loss.backward()
+ 
++                    ################################################################################
++                    if self.seppo:
++                        for lname, lmod in self.linear_modules.items():
++                            w = getattr(lmod, "weight", None)
++                            b = getattr(lmod, "bias", None)
++                            if w is not None and w.grad is not None and hasattr(lmod, "g_scaling") and hasattr(lmod, "a_scaling"):
++                                print(f"scaling weight: {lname} {w.shape}")
++                                print(f"  linear dims in/out: {getattr(lmod,'in_features',None)}/{getattr(lmod,'out_features',None)}")
++                                print(f"scaling weight grad: {lname} {w.grad.shape}")
++                                mul = lmod.g_scaling[:, None] * lmod.a_scaling[None, :]
++                                print(f"mul: {mul.shape}")
++                                mul = mul.view(-1)
++                                w.grad.mul_(mul)
++
++                                # Minimal flat-grad mapping debug for FSDP wrapper
++                                # Try to find any flat 1D parameter with grad on this module (wrapper or inner)
++                                flat = None
++                                for p in self.actor_module.parameters():
++                                    if p.grad is not None and p.ndim == 1:
++                                        flat = p
++                                        break
++                                if flat is not None:
++                                    gflat = flat.grad.view(-1)
++                                    print(f"flat.grad len: {gflat.numel()}")
++                                    if hasattr(flat, "_param_infos") and flat._param_infos:
++                                        for i, info in enumerate(flat._param_infos[:10]):
++                                            pp = getattr(info, "param", None)
++                                            start = getattr(info, "start_idx", getattr(info, "flat_param_start_idx", None))
++                                            if pp is not None:
++                                                print(f"flat map {i}: start {start} numel {pp.numel()} shape {tuple(pp.shape)}")
++                                    else:
++                                        shapes = getattr(flat, "_shapes", None) or getattr(flat, "_param_shapes", None)
++                                        fqns = getattr(flat, "_fqns", None)
++                                        if shapes is not None:
++                                            off = 0
++                                            for i, s in enumerate(shapes[:10]):
++                                                n = int(torch.tensor(s).prod().item())
++                                                name = fqns[i] if fqns is not None else f"param_{i}"
++                                                print(f"flat map {i}: {name} range [{off},{off+n}) shape {tuple(s)}")
++                                                off += n
++                            if b is not None and b.grad is not None and hasattr(lmod, "g_scaling"):
++                                print(f"scaling bias grad: {lname} {b.grad.shape}")
++                                print(f"  linear out_features (bias): {getattr(lmod,'out_features',None)}")
++                                b.grad.mul_(lmod.g_scaling)
++
++                        for name, param in self.actor_module.named_parameters():
++                            if "weight" not in name and "bias" not in name and param is not None and param.grad is not None:
++                                param.grad.mul_(0.0)
++                                print(f"scaling other param grad: {name} {param.grad.shape}")
++
++                    ################################################################################
++
+                     micro_batch_metrics.update(
+                         {
+                             "actor/pg_loss": pg_loss.detach().item(),

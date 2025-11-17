@@ -1,0 +1,43 @@
+diff --git a/verl/workers/fsdp_workers.py b/verl/workers/fsdp_workers.py
+index 907a2fa7..0f61b411 100644
+--- a/verl/workers/fsdp_workers.py
++++ b/verl/workers/fsdp_workers.py
+@@ -419,6 +419,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
+         if role == "actor" and optim_config is not None:
+             from verl.utils.torch_functional import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
+ 
++            # Original behavior: AdamW
+             actor_optimizer = optim.AdamW(
+                 actor_module_fsdp.parameters(),
+                 lr=optim_config.lr,
+@@ -426,6 +427,30 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
+                 weight_decay=optim_config.get("weight_decay", 1e-2),
+             )
+ 
++            # Optional override to SGD (actor-only), controlled via config
++            opt_name = str(
++                optim_config.get(
++                    "name",
++                    optim_config.get("extra", {}).get("optimizer", ""),
++                )
++            ).lower()
++            if opt_name == "sgd":
++                momentum = optim_config.get(
++                    "momentum", optim_config.get("extra", {}).get("momentum", 0.0)
++                )
++                actor_optimizer = optim.SGD(
++                    actor_module_fsdp.parameters(),
++                    lr=optim_config.lr,
++                    momentum=momentum,
++                    weight_decay=optim_config.get("weight_decay", 1e-2),
++                )
++                # Print on rank 0 so it's visible even if logging level hides INFO
++                if getattr(self, "rank", 0) == 0:
++                    print(
++                        f"[actor] optimizer=SGD lr={optim_config.lr} momentum={momentum} "
++                        f"weight_decay={optim_config.get('weight_decay', 1e-2)}"
++                    )
++
+             total_steps = optim_config.get("total_training_steps", 0)
+             num_warmup_steps = int(optim_config.get("lr_warmup_steps", -1))
+             warmup_style = optim_config.get("warmup_style", "constant")
