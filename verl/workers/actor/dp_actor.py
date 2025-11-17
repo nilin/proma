@@ -664,6 +664,24 @@ class DataParallelPPOActor(BasePPOActor):
                         break
 
                 ################################################################################
+
+                for lname, lmod in base_module.named_modules():
+                    if isinstance(lmod, nn.Linear):
+                        for pname, p in lmod.named_parameters(recurse=False):
+                            sl = self.dt_local_global_slices(p.grad)
+                            g = p.grad.to_local()
+                            try:
+                                assert len(sl) == 2, "Expected 2 dimensions for shard mapping"
+                                scaling = lmod.g_scaling[sl[0], None] * lmod.a_scaling[None, sl[1]]
+                                g = g * scaling
+                                p.grad = g.to_global() # is this needed?
+                            except Exception:
+                                p.grad.mul_(0.0)
+
+                            local_shape = tuple(g.to_local().shape)
+                            print(f"[shard map] rank={dist.get_rank()} {lname}.{pname} -> global{sl}, local_shape={local_shape}")
+
+                ################################################################################
                 # Optional: dump per-layer Linear parameter grads before optimizer step
                 # If seppo_full_grad=True, gather full unsharded gradients (DTensor -> Replicate) on ALL ranks
                 # and print only on rank 0. Otherwise, print a global L2 norm summary without all-gather.
