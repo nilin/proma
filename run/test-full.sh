@@ -67,13 +67,17 @@ switch-alg-2updates () {
     trainer.resume_mode=disable \
     trainer.project_name='seppo' \
     trainer.total_training_steps=102 \
-    trainer.n_gpus_per_node=4 \
+    trainer.n_gpus_per_node=2 \
 	$@
 
     bash run/next.sh
 }
 
 switch-alg-2updates \
+	+actor_rollout_ref.actor.use_seppo=True \
+	+actor_rollout_ref.actor.seppo_testing=True \
+	actor_rollout_ref.actor.optim.optimizer=SGD \
+	actor_rollout_ref.actor.optim.optimizer_impl=torch.optim \
     actor_rollout_ref.actor.optim.lr=2e-5 \
     trainer.val_before_train=False \
     actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
