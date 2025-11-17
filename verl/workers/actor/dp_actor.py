@@ -698,17 +698,11 @@ class DataParallelPPOActor(BasePPOActor):
                             # Broadcasted in-place scaling on the shard
                             with torch.no_grad():
                                 g_local.mul_(scaling)
+                                print(f"scaling {lname}.{pname}: {g_local.shape} {scaling.shape}")
                         except Exception:
                             # Fallback: zero grad safely
                             with torch.no_grad():
                                 dtg.mul_(0.0)
-
-                        # Print shard mapping summary for visibility
-                        try:
-                            local_shape = tuple(dtg.to_local().shape)
-                        except Exception:
-                            local_shape = ("?",)
-                        print(f"[shard map] rank={dist.get_rank()} {lname}.{pname} -> global{sl}, local_shape={local_shape}")
 
                 ################################################################################
                 # Optional: dump per-layer Linear parameter grads before optimizer step
