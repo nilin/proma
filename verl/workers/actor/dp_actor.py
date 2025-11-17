@@ -95,6 +95,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         if self.seppo:
             self.install_seppo_hooks()
+            self.reset_seppo_stats()
 
 
     #########################################################
@@ -144,8 +145,8 @@ class DataParallelPPOActor(BasePPOActor):
                 act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None]
                 g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
 
-                mod.a_norm = act_in.float().norm(dim=0) / math.sqrt(act_in.shape[0])
-                mod.g_norm = g_out.float().norm(dim=0) / math.sqrt(g_out.shape[0])
+                mod.a_norms.append(act_in.float().norm(dim=0) / math.sqrt(act_in.shape[0]))
+                mod.g_norms.append(g_out.float().norm(dim=0) / math.sqrt(g_out.shape[0]))
                 #mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
                 #mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
 
@@ -171,6 +172,11 @@ class DataParallelPPOActor(BasePPOActor):
 
             lmod.register_forward_hook(_fwd_hook)
             lmod.register_full_backward_hook(_bwd_hook)
+
+    def reset_seppo_stats(self):
+        for lname, lmod in self.linear_modules.items():
+            lmod.a_norms = []
+            lmod.g_norms = []
 
     def flatten_response_window(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Flatten non-padding response tokens to (N, ...).
@@ -668,17 +674,38 @@ class DataParallelPPOActor(BasePPOActor):
                 for lname, lmod in base_module.named_modules():
                     if isinstance(lmod, nn.Linear):
                         for pname, p in lmod.named_parameters(recurse=False):
-                            sl = self.dt_local_global_slices(p.grad)
-                            g = p.grad.to_local()
+                            dtg = p.grad
                             try:
+                                sl = self.dt_local_global_slices(dtg)
                                 assert len(sl) == 2, "Expected 2 dimensions for shard mapping"
-                                scaling = lmod.g_scaling[sl[0], None] * lmod.a_scaling[None, sl[1]]
-                                g = g * scaling
-                                p.grad = g.to_global() # is this needed?
-                            except Exception:
-                                p.grad.mul_(0.0)
+                                # Work on local shard tensor; no collectives
+                                g_local = dtg.to_local()
+                                # Select matching per-row/col scalars and align dtype/device
 
-                            local_shape = tuple(g.to_local().shape)
+                                scale = 0.0
+                                for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
+                                    row_scale = g_norm[sl[0]].to(device=g_local.device, dtype=g_local.dtype)
+                                    col_scale = a_norm[sl[1]].to(device=g_local.device, dtype=g_local.dtype)
+                                    scale += row_scale[:, None] * col_scale[None, :]
+
+                                lmod.g_norms.clear()
+                                lmod.a_norms.clear()
+
+                                scaling = 1.0 / (scale + 1e-6 * scale.mean())
+
+                                # Broadcasted in-place scaling on the shard
+                                with torch.no_grad():
+                                    g_local.mul_(scaling)
+                            except Exception:
+                                # Fallback: zero grad safely
+                                with torch.no_grad():
+                                    dtg.mul_(0.0)
+
+                            # Print shard mapping summary for visibility
+                            try:
+                                local_shape = tuple(dtg.to_local().shape)
+                            except Exception:
+                                local_shape = ("?",)
                             print(f"[shard map] rank={dist.get_rank()} {lname}.{pname} -> global{sl}, local_shape={local_shape}")
 
                 ################################################################################
