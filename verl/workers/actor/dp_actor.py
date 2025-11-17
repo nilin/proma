@@ -291,7 +291,8 @@ class DataParallelPPOActor(BasePPOActor):
 
                 else:
                     logits_rmpad = output.logits.squeeze(0)  # (total_nnz, vocab_size)
-                    logits_rmpad.div_(temperature)
+                    # Avoid in-place ops on views returned by custom Functions; use out-of-place scaling
+                    logits_rmpad = logits_rmpad / temperature
 
                     # if use_sp: ((total_nnz / sp) + pad) ; if not use_sp: (batch, seqlen)
                     inplace_backward = True
@@ -369,8 +370,8 @@ class DataParallelPPOActor(BasePPOActor):
 
                 else:
                     logits = output.logits
-
-                    logits.div_(temperature)
+                    # Avoid in-place ops on views returned by custom Functions; use out-of-place scaling
+                    logits = logits / temperature
                     logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
                     log_probs = logprobs_from_logits(logits, micro_batch["responses"])
                     if calculate_entropy:
