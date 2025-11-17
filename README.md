@@ -23,9 +23,6 @@ pip install --no-deps -e .
 conda install -c nvidia/label/cuda-12.4.0 cuda
 export CUDA_HOME=/home/ubuntu/anaconda3/envs/seppo2
 export FLASHINFER_CUDA_HOME=$CUDA_HOME
-rm -rf ~/.cache/flashinfer
-pip install --force-reinstall --no-cache-dir flashinfer
-
 pip uninstall -y flashinfer flashinfer-python || true
 rm -rf ~/.cache/flashinfer
 
@@ -34,6 +31,14 @@ nvcc --version
 
 # 3) Install FlashInfer from PyPI (correct package name)
 pip install flashinfer-python -i https://pypi.org/simple
+
+
+pip install huggingface_hub[cli]
+huggingface-cli download Qwen/Qwen3-0.6B --local-dir ./models/Qwen3-0.6B
+python examples/data_preprocess/gsm8k.py
+
+# substitute with your wandb key
+wandb login $WANDB_API_KEY
 ```
 
 
