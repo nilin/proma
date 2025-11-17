@@ -23,7 +23,7 @@ import os
 import torch
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DTensor, Replicate
+from torch.distributed.tensor import DTensor, Replicate, Shard
 
 import verl.utils.torch_functional as verl_F
 from verl import DataProto
@@ -92,8 +92,6 @@ class DataParallelPPOActor(BasePPOActor):
 
         self.seppo = self.config.get("use_seppo", False)
         self.testing = self.config.get("seppo_testing", False)
-        # When enabled, gather and print full unsharded gradients for Linear params
-        self.seppo_full_grad = self.config.get("seppo_full_grad", False)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -192,6 +190,50 @@ class DataParallelPPOActor(BasePPOActor):
         # Ensure mask device matches x for boolean indexing
         sel = response_mask.to(device=x.device).bool()
         return x[sel]
+
+    def dt_local_global_slices(self, g: DTensor) -> tuple[slice, ...]:
+        """Return the global index slices that the local DTensor shard maps to.
+
+        This uses the DTensor's device mesh coordinates and placements to compute,
+        for each sharded dimension, the [start:end) range of the local shard in the
+        full (global) tensor. Replicated dimensions are returned as slice(None).
+
+        Notes:
+        - No collectives are issued. This is cheap and safe to call during training.
+        - Works with uneven splits (remainder distributed to lower ranks).
+        - If the DTensor has Partial placements, the slice still denotes the logical
+          region contributed by this rank, though values may be partially reduced.
+        """
+        assert isinstance(g, DTensor), "Expected a DTensor"
+
+        global_shape = tuple(g.shape)
+        mesh = g.device_mesh
+        coord = mesh.get_coordinate()
+
+        # Fallback: if no mesh coordinate (single-rank or not initialized), return full slices
+        if coord is None:
+            return tuple(slice(None) for _ in global_shape)
+
+        slices = [slice(None)] * len(global_shape)
+        for mesh_axis, placement in enumerate(g.placements):
+            if isinstance(placement, Shard):
+                dim = placement.dim
+                S = global_shape[dim]
+                world = mesh.size(mesh_axis)
+                i = coord[mesh_axis]
+                base = S // world
+                rem = S % world
+                start = i * base + min(i, rem)
+                length = base + (1 if i < rem else 0)
+                slices[dim] = slice(start, start + length)
+            elif isinstance(placement, Replicate):
+                # full dimension
+                continue
+            else:
+                # Partial or other placements: keep slice(None) to denote full logical dim
+                continue
+
+        return tuple(slices)
 
     #########################################################
 
@@ -636,34 +678,30 @@ class DataParallelPPOActor(BasePPOActor):
                                 if g is None:
                                     continue
                                 shape = tuple(p.shape)  # global, unsharded param shape
-                                if self.seppo_full_grad:
-                                    # Gather full unsharded grad on ALL ranks by redistributing to Replicate
-                                    if isinstance(g, DTensor):
-                                        try:
-                                            g_rep = g.redistribute(g.device_mesh, placements=[Replicate()])
-                                            g_full = g_rep.to_local()  # replicated: local tensor is the full grad
-                                        except Exception:
-                                            # Fallback to all-gather via full_tensor on ALL ranks
-                                            g_full = g.full_tensor()
-                                    else:
-                                        g_full = g
-                                    if dist.get_rank() == 0:
-                                        # Print the entire unsharded gradient tensor (can be very large)
-                                        print(f"[actor grad full] {lname}.{pname}: shape={shape}\n{g_full.detach().cpu()}")
+
+                                # Print shard mapping for DTensor grads (on all ranks) without collectives
+                                if isinstance(g, DTensor):
+                                    sl = self.dt_local_global_slices(g)
+                                    try:
+                                        local_shape = tuple(g.to_local().shape)
+                                    except Exception:
+                                        local_shape = ("?",)
+                                    r = dist.get_rank()
+                                    print(f"[shard map] rank={r} {lname}.{pname} -> global{sl}, local_shape={local_shape}")
+
+                                # Gather full unsharded grad on ALL ranks by redistributing to Replicate
+                                if isinstance(g, DTensor):
+                                    try:
+                                        g_rep = g.redistribute(g.device_mesh, placements=[Replicate()])
+                                        g_full = g_rep.to_local()  # replicated: local tensor is the full grad
+                                    except Exception:
+                                        # Fallback to all-gather via full_tensor on ALL ranks
+                                        g_full = g.full_tensor()
                                 else:
-                                    # Summary only: global L2 norm via all_reduce of local squares
-                                    if isinstance(g, DTensor):
-                                        try:
-                                            g_local = g.to_local()
-                                            local_sq = (g_local.float() * g_local.float()).sum()
-                                            dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
-                                            gnorm = local_sq.sqrt().item()
-                                        except Exception:
-                                            gnorm = g.to_local().float().norm().item()
-                                    else:
-                                        gnorm = g.float().norm().item()
-                                    if dist.get_rank() == 0:
-                                        print(f"[actor grad] {lname}.{pname}: shape={shape}, norm={gnorm:.4e}")
+                                    g_full = g
+                                if dist.get_rank() == 0:
+                                    # Print the entire unsharded gradient tensor (can be very large)
+                                    print(f"[actor grad full] {lname}.{pname}: shape={shape}\n{g_full.detach().cpu()}")
                 ################################################################################
 
                 grad_norm = self._optimizer_step()
