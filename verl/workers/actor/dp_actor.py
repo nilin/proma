@@ -83,6 +83,106 @@ class DataParallelPPOActor(BasePPOActor):
         )
         self.device_name = get_device_name()
 
+        #########################################################
+        # SEPPO hooks
+        #########################################################
+
+        self.seppo = self.config.get("use_seppo", False)
+
+        if self.seppo:
+            self.install_seppo_hooks()
+
+
+    #########################################################
+
+    def install_seppo_hooks(self):
+        """Install SEPPO hooks that
+        - store forward activations (act_in) per Linear layer
+        - compute a per-layer scalar from act_in and backward grad_out in a full backward hook
+        - use that scalar to scale the parameter gradients via param hooks
+
+        This is lightweight and safe under FSDP: scaling is applied on sharded grads.
+        """
+        self.linear_modules = {n: sub for n, sub in self.actor_module.named_modules() if isinstance(sub, nn.Linear)}
+        # Map original params to their owning linear module for quick lookup
+        self._seppo_param_to_module = {}
+        for _, m in self.linear_modules.items():
+            if hasattr(m, "weight") and isinstance(m.weight, torch.nn.Parameter):
+                self._seppo_param_to_module[m.weight] = m
+            if hasattr(m, "bias") and isinstance(m.bias, torch.nn.Parameter) and m.bias is not None:
+                self._seppo_param_to_module[m.bias] = m
+
+        for lname, lmod in self.linear_modules.items():
+            # storage on module
+            lmod._seppo_act_in = None
+            lmod._seppo_scale = 1.0
+
+            # Forward hook to capture input activations
+            def _fwd_hook(mod, inputs, output):
+                in_tensor = inputs[0] if isinstance(inputs, (tuple, list)) else inputs
+                try:
+                    mod._seppo_act_in = in_tensor.detach()
+                except Exception:
+                    mod._seppo_act_in = None
+
+            # Full backward hook to compute a scalar using act_in and grad_out
+            def _bwd_hook(mod, grad_input, grad_output):
+                act_in = mod._seppo_act_in
+                g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
+
+                # Explicitly remove a leading singleton (e.g., [1, T, D] -> [T, D])
+                if act_in.dim() >= 3 and act_in.size(0) == 1:
+                    act_in = act_in[0]
+                if g_out.dim() >= 3 and g_out.size(0) == 1:
+                    g_out = g_out[0]
+
+                non0 = self.mcb_advantages != 0
+                act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None]
+                g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
+
+                mod.a_norm = act_in.float().norm(dim=0) / math.sqrt(act_in.shape[0])
+                mod.g_norm = g_out.float().norm(dim=0) / math.sqrt(g_out.shape[0])
+                mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
+                mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
+
+            # Parameter hooks to allow assigning or scaling gradients for weight and bias
+            def _make_weight_hook(mod):
+                def _hook(grad):
+                    grad = mod.g_scaling[:, None] * mod.a_scaling[None, :] * grad
+                    return grad
+                return _hook
+
+            def _make_bias_hook(mod):
+                def _hook(grad):
+                    grad = mod.g_scaling * grad
+                    return grad
+                return _hook
+
+            lmod.register_forward_hook(_fwd_hook)
+            lmod.register_full_backward_hook(_bwd_hook)
+
+    def flatten_response_window(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+        """Flatten non-padding response tokens to (N, ...).
+
+        - Input `x` has shape `(B, R)` or `(B, R, H, ...)`.
+        - `response_mask` has shape `(B, R)` with 1/True for valid response tokens.
+        - Returns tensor with first two dims flattened to the valid rows only:
+          `(N,)` if `x` is 2D, or `(N, H, ...)` if `x` has more dims, where `N = response_mask.sum()`.
+        """
+        if x.dim() == 1:
+            x = x[:,None].expand_as(response_mask)
+        
+        assert x.dim() >= 2, "x must have at least 2 dims (B, R, ...)"
+        assert x.shape[0] == response_mask.shape[0] and x.shape[1] == response_mask.shape[1], (
+            f"x first two dims {x.shape[:2]} must match response_mask {response_mask.shape}"
+        )
+        # Ensure mask device matches x for boolean indexing
+        sel = response_mask.to(device=x.device).bool()
+        return x[sel]
+
+    #########################################################
+
+
     def _forward_micro_batch(
         self, micro_batch, temperature, calculate_entropy=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -418,6 +518,16 @@ class DataParallelPPOActor(BasePPOActor):
                         loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
                     else:
                         loss_scale_factor = 1 / self.gradient_accumulation
+
+                    ################################################################################
+
+                    if self.seppo:
+                        attention_mask = model_inputs["attention_mask"]
+                        advantages_w_prompt = torch.zeros_like(attention_mask)
+                        advantages_w_prompt[:, -advantages.shape[1]:] = advantages
+                        self.mcb_advantages = self.flatten_response_window(advantages_w_prompt, attention_mask)
+
+                    ################################################################################
 
                     # all return: (bsz, response_length)
                     calculate_entropy = False
