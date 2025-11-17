@@ -112,6 +112,7 @@ class ActorConfig(BaseConfig):
     kl_loss_type: str = "low_var_kl"
     # Enable SEPPO hooks in the actor implementation when True
     use_seppo: bool = False
+    seppo_testing: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)

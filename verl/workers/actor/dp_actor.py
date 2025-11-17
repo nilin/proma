@@ -39,6 +39,8 @@ from verl.utils.ulysses import gather_outputs_and_unpad, ulysses_pad, ulysses_pa
 from verl.workers.actor import BasePPOActor
 from verl.workers.config import ActorConfig
 
+import math
+
 __all__ = ["DataParallelPPOActor"]
 
 logger = logging.getLogger(__file__)
@@ -88,6 +90,7 @@ class DataParallelPPOActor(BasePPOActor):
         #########################################################
 
         self.seppo = self.config.get("use_seppo", False)
+        self.testing = self.config.get("seppo_testing", False)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -144,6 +147,12 @@ class DataParallelPPOActor(BasePPOActor):
                 mod.g_norm = g_out.float().norm(dim=0) / math.sqrt(g_out.shape[0])
                 mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
                 mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
+
+                if self.testing:
+                    print(f"mod.a_norm: {mod.a_norm}")
+                    print(f"mod.g_norm: {mod.g_norm}")
+                    print(f"mod.a_scaling: {mod.a_scaling}")
+                    print(f"mod.g_scaling: {mod.g_scaling}")
 
             # Parameter hooks to allow assigning or scaling gradients for weight and bias
             def _make_weight_hook(mod):
