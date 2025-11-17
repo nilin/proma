@@ -670,44 +670,45 @@ class DataParallelPPOActor(BasePPOActor):
                         break
 
                 ################################################################################
+                
+                for lname, lmod in self.linear_modules.items():
+                    for pname, p in lmod.named_parameters(recurse=False):
+                        dtg = p.grad
+                        if dtg is None:
+                            continue
+                        try:
+                            sl = self.dt_local_global_slices(dtg)
+                            assert len(sl) == 2, "Expected 2 dimensions for shard mapping"
+                            # Work on local shard tensor; no collectives
+                            g_local = dtg.to_local()
+                            # Select matching per-row/col scalars and align dtype/device
 
-                for lname, lmod in base_module.named_modules():
-                    if isinstance(lmod, nn.Linear):
-                        for pname, p in lmod.named_parameters(recurse=False):
-                            dtg = p.grad
-                            try:
-                                sl = self.dt_local_global_slices(dtg)
-                                assert len(sl) == 2, "Expected 2 dimensions for shard mapping"
-                                # Work on local shard tensor; no collectives
-                                g_local = dtg.to_local()
-                                # Select matching per-row/col scalars and align dtype/device
+                            scale = 0.0
+                            for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
+                                row_scale = g_norm[sl[0]].to(device=g_local.device, dtype=g_local.dtype) ** 2
+                                col_scale = a_norm[sl[1]].to(device=g_local.device, dtype=g_local.dtype) ** 2
+                                scale += row_scale[:, None] * col_scale[None, :] / len(lmod.g_norms)
+                            scale = scale.sqrt()
 
-                                scale = 0.0
-                                for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
-                                    row_scale = g_norm[sl[0]].to(device=g_local.device, dtype=g_local.dtype) ** 2
-                                    col_scale = a_norm[sl[1]].to(device=g_local.device, dtype=g_local.dtype) ** 2
-                                    scale += row_scale[:, None] * col_scale[None, :] / len(lmod.g_norms)
-                                scale = scale.sqrt()
+                            lmod.g_norms.clear()
+                            lmod.a_norms.clear()
 
-                                lmod.g_norms.clear()
-                                lmod.a_norms.clear()
+                            scaling = 1.0 / (scale + 1e-6 * scale.mean())
 
-                                scaling = 1.0 / (scale + 1e-6 * scale.mean())
+                            # Broadcasted in-place scaling on the shard
+                            with torch.no_grad():
+                                g_local.mul_(scaling)
+                        except Exception:
+                            # Fallback: zero grad safely
+                            with torch.no_grad():
+                                dtg.mul_(0.0)
 
-                                # Broadcasted in-place scaling on the shard
-                                with torch.no_grad():
-                                    g_local.mul_(scaling)
-                            except Exception:
-                                # Fallback: zero grad safely
-                                with torch.no_grad():
-                                    dtg.mul_(0.0)
-
-                            # Print shard mapping summary for visibility
-                            try:
-                                local_shape = tuple(dtg.to_local().shape)
-                            except Exception:
-                                local_shape = ("?",)
-                            print(f"[shard map] rank={dist.get_rank()} {lname}.{pname} -> global{sl}, local_shape={local_shape}")
+                        # Print shard mapping summary for visibility
+                        try:
+                            local_shape = tuple(dtg.to_local().shape)
+                        except Exception:
+                            local_shape = ("?",)
+                        print(f"[shard map] rank={dist.get_rank()} {lname}.{pname} -> global{sl}, local_shape={local_shape}")
 
                 ################################################################################
                 # Optional: dump per-layer Linear parameter grads before optimizer step
