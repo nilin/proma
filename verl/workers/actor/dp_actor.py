@@ -695,6 +695,10 @@ class DataParallelPPOActor(BasePPOActor):
 
                             scaling = 1.0 / (scale + 1e-6 * scale.mean())
 
+                            if scale.mean() == 0.0:
+                                print(f"WARN: rank {dist.get_rank()} {lname}.{pname} scale is 0.0")
+                                scaling = 0.0
+
                             # Broadcasted in-place scaling on the shard
                             with torch.no_grad():
                                 g_local.mul_(scaling)
