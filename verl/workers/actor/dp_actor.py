@@ -767,6 +767,39 @@ class DataParallelPPOActor(BasePPOActor):
                                     print(f"[actor grad full] {lname}.{pname}: shape={shape}\n{g_full.detach().cpu()}")
                 ################################################################################
 
+                # Diagnostics: print first offending grad with non-finite values before optimizer step
+                try:
+                    base_module = getattr(
+                        self.actor_module, "module", getattr(self.actor_module, "_fsdp_wrapped_module", self.actor_module)
+                    )
+                    for pname, p in base_module.named_parameters(recurse=True):
+                        g = p.grad
+                        if g is None:
+                            continue
+                        # Work on local shard for DTensor grads
+                        if isinstance(g, DTensor):
+                            try:
+                                g_local = g.to_local()
+                            except Exception:
+                                # Fallback: best-effort materialization
+                                g_local = g.full_tensor()
+                        else:
+                            g_local = g
+                        finite_mask = torch.isfinite(g_local)
+                        if not finite_mask.all():
+                            n_nan = torch.isnan(g_local).sum().item()
+                            pos_inf = torch.isinf(g_local).logical_and(g_local > 0).sum().item()
+                            neg_inf = torch.isinf(g_local).logical_and(g_local < 0).sum().item()
+                            abs_max = float(g_local[finite_mask].abs().max().item()) if finite_mask.any() else float("nan")
+                            r = dist.get_rank() if dist.is_available() and dist.is_initialized() else -1
+                            print(
+                                f"[grad diag] rank={r} param={pname} dtype={g_local.dtype} local_shape={tuple(g_local.shape)} "
+                                f"nan={n_nan} +inf={pos_inf} -inf={neg_inf} abs_max={abs_max}"
+                            )
+                            break
+                except Exception:
+                    pass
+
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, mini_batch_metrics)
