@@ -678,53 +678,41 @@ class DataParallelPPOActor(BasePPOActor):
                         dtg = p.grad
                         if dtg is None:
                             continue
-                        try:
-                            sl = self.dt_local_global_slices(dtg)
-                            assert len(sl) == 2, "Expected 2 dimensions for shard mapping"
-                            # Work on local shard tensor; no collectives
-                            g_local = dtg.to_local()
-                            # Select matching per-row/col scalars and align dtype/device
+                        sl = self.dt_local_global_slices(dtg)
 
-                            # Compute scale in fp32 to avoid precision loss
-                            scale = 0.0
-                            for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
-                                row_scale = g_norm[sl[0]].to(device=g_local.device, dtype=torch.float32) ** 2
-                                col_scale = a_norm[sl[1]].to(device=g_local.device, dtype=torch.float32) ** 2
-                                scale = scale + (row_scale[:, None] * col_scale[None, :]) / len(lmod.g_norms)
-                            scale = scale.sqrt()  # fp32 tensor
-
-                            lmod.g_norms.clear()
-                            lmod.a_norms.clear()
-
-                            # Compute scaling in fp32
-                            scaling = 1.0 / (scale + 1e-6 * scale.mean())  # fp32 tensor
-
-                            if scale.mean() == 0.0:
-                                print(f"WARN: rank {dist.get_rank()} {lname}.{pname} scale is 0.0")
-                                scaling = 0.0
-
-                            # Broadcasted in-place scaling on the shard
-                            # Do the multiply in fp32 to avoid overflow in low precision, then copy back
-                            with torch.no_grad():
-                                g32 = g_local.float()
-                                s32 = scaling.to(dtype=torch.float32)
-                                g32.mul_(s32)
-                                # Clamp to target dtype range to avoid overflow on cast-back
-                                try:
-                                    bound = torch.finfo(g_local.dtype).max
-                                except Exception:
-                                    bound = float('inf')
-                                if bound < float('inf'):
-                                    g32.clamp_(-bound, bound)
-                                g_local.copy_(g32.to(dtype=g_local.dtype))
-                                print(
-                                    f"scaling {lname}.{pname}: g_local.shape {g_local.shape} scaling.shape {scaling.shape} "
-                                    f"scale.mean() {scale.mean()} scaling.mean() {scaling.mean()}"
-                                )
-                        except Exception:
-                            # Fallback: zero grad safely
+                        if len(sl) != 2:
                             with torch.no_grad():
                                 dtg.mul_(0.0)
+                            print(f"WARN: rank {dist.get_rank()} {lname}.{pname} has {len(sl)} dimensions for shard mapping")
+                            continue
+
+                        # Work on local shard tensor; no collectives
+                        g_local = dtg.to_local()
+                        # Select matching per-row/col scalars and align dtype/device
+
+                        # Compute scale in fp32 to avoid precision loss
+                        scale = 0.0
+                        for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
+                            row_scale = g_norm[sl[0]].to(device=g_local.device) ** 2
+                            col_scale = a_norm[sl[1]].to(device=g_local.device) ** 2
+                            scale = scale + (row_scale[:, None] * col_scale[None, :]) / len(lmod.g_norms)
+                        scale = scale.sqrt()  # fp32 tensor
+
+                        lmod.g_norms.clear()
+                        lmod.a_norms.clear()
+
+                        # Compute scaling in fp32
+                        scaling = 1.0 / (scale + 1e-6 * scale.mean())  # fp32 tensor
+
+                        if scale.mean() == 0.0:
+                            print(f"WARN: rank {dist.get_rank()} {lname}.{pname} scale is 0.0")
+                            scaling = 0.0
+
+                        # Broadcasted in-place scaling on the shard
+                        with torch.no_grad():
+                            g_local.mul_(scaling)
+                            bound = 1e4
+                            g_local.clamp_(-bound, bound)
 
                 ################################################################################
                 # Optional: dump per-layer Linear parameter grads before optimizer step
