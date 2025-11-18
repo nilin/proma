@@ -702,7 +702,10 @@ class DataParallelPPOActor(BasePPOActor):
                             # Broadcasted in-place scaling on the shard
                             with torch.no_grad():
                                 g_local.mul_(scaling)
-                                print(f"scaling {lname}.{pname}: {g_local.shape} {scaling.shape}")
+                                print(
+                                    f"scaling {lname}.{pname}: g_local.shape {g_local.shape} scaling.shape {scaling.shape} "
+                                    f"scale.mean() {scale.mean()} scaling.mean() {scaling.mean()}"
+                                )
                         except Exception:
                             # Fallback: zero grad safely
                             with torch.no_grad():
