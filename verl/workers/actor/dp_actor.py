@@ -144,6 +144,7 @@ class DataParallelPPOActor(BasePPOActor):
                 non0 = self.mcb_advantages != 0
                 act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None]
                 g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
+                g_out = g_out / self.loss_scale_factor
 
                 mod.a_norms.append(act_in.float().norm(dim=0) / math.sqrt(act_in.shape[0]))
                 mod.g_norms.append(g_out.float().norm(dim=0) / math.sqrt(g_out.shape[0]))
@@ -588,6 +589,7 @@ class DataParallelPPOActor(BasePPOActor):
                         advantages_w_prompt = torch.zeros_like(attention_mask)
                         advantages_w_prompt[:, -advantages.shape[1]:] = advantages
                         self.mcb_advantages = self.flatten_response_window(advantages_w_prompt, attention_mask)
+                        self.loss_scale_factor = loss_scale_factor
 
                     ################################################################################
 
