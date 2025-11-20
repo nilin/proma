@@ -716,7 +716,7 @@ class DataParallelPPOActor(BasePPOActor):
                             scale_pre_clamp = scale.clone()
                             scale = torch.clamp(scale, min=1e-2*scale.mean())
                             scale = torch.clamp(scale, min=median_scale)
-                            print(f"{(scale<scale_pre_clamp).float().mean():.2%} of scales were clamped")
+                            print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
                             scaling = 1.0 / scale
 
                             # Broadcasted in-place scaling on the shard
