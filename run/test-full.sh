@@ -75,7 +75,7 @@ switch-alg-2updates \
 	actor_rollout_ref.actor.optim.optimizer=SGD \
 	actor_rollout_ref.actor.optim.optimizer_impl=torch.optim \
     actor_rollout_ref.actor.optim.lr=2e-5 \
-    trainer.val_before_train=False \
+    trainer.val_before_train=True \
     actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
 	actor_rollout_ref.actor.strategy=fsdp2 \
 	critic.strategy=fsdp2 \
