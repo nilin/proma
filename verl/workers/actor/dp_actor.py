@@ -694,7 +694,7 @@ class DataParallelPPOActor(BasePPOActor):
                             # Select matching per-row/col scalars and align dtype/device
 
                             # Compute scale in fp32 to avoid precision loss
-                            scale = 0.0
+                            sq_scale = 0.0
                             for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
                                 row_scale = g_norm[sl[0]].to(device=g_local.device) ** 2
                                 col_scale = a_norm[sl[1]].to(device=g_local.device) ** 2
@@ -702,11 +702,12 @@ class DataParallelPPOActor(BasePPOActor):
                                 if task == get_scalars:
                                     scales.append(torch.sqrt(row_scale.median() * col_scale.median()))
                                 else:
-                                    scale = scale + (row_scale[:, None] * col_scale[None, :]) / len(lmod.g_norms)
-                            scale = scale.sqrt()  # fp32 tensor
+                                    sq_scale = sq_scale + (row_scale[:, None] * col_scale[None, :]) / len(lmod.g_norms)
 
                             if task == get_scalars:
                                 continue
+                            else:
+                                scale = sq_scale.sqrt()
 
                             lmod.g_norms.clear()
                             lmod.a_norms.clear()
