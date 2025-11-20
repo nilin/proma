@@ -714,7 +714,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                             # Compute scaling in fp32
                             scale_pre_clamp = scale.clone()
-                            scale = torch.clamp(scale, min=1e-2*scale.mean())
+                            scale = torch.clamp(scale, min=scale.median())
                             scale = torch.clamp(scale, min=median_scale)
                             print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
                             scaling = 1.0 / scale
