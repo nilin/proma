@@ -22,10 +22,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.entropy_coeff=0.0 \
     actor_rollout_ref.actor.policy_loss.loss_mode="vanilla" \
     actor_rollout_ref.actor.loss_agg_mode="token-mean" \
-    actor_rollout_ref.actor.clip_ratio=1e9 \
-    actor_rollout_ref.actor.clip_ratio_high=1e9 \
-    actor_rollout_ref.actor.clip_ratio_low=1e9 \
-    actor_rollout_ref.actor.clip_ratio_c=1e9 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
@@ -84,6 +80,11 @@ switch-alg-2updates \
 	actor_rollout_ref.actor.strategy=fsdp2 \
 	critic.strategy=fsdp2 \
     trainer.experiment_name=TEST-FULL 
+
+    #actor_rollout_ref.actor.clip_ratio=1e9 \
+    #actor_rollout_ref.actor.clip_ratio_high=1e9 \
+    #actor_rollout_ref.actor.clip_ratio_low=1e9 \
+    #actor_rollout_ref.actor.clip_ratio_c=1e9 \
 
 #switch-alg-2updates \
 #    +actor_rollout_ref.actor.extra.seppo=True \
