@@ -700,7 +700,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 col_scale = a_norm[sl[1]].to(device=g_local.device) ** 2
 
                                 if task == get_scalars:
-                                    scales.append((row_scale.median() * col_scale.median()).sqrt())
+                                    scales.append(torch.sqrt(row_scale.median() * col_scale.median()))
                                 else:
                                     scale = scale + (row_scale[:, None] * col_scale[None, :]) / len(lmod.g_norms)
                             scale = scale.sqrt()  # fp32 tensor
