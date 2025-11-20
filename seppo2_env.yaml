@@ -244,7 +244,7 @@ dependencies:
       - opencensus-context==0.1.3
       - opencv-fixer==0.2.5
       - opencv-python==4.12.0.88
-      - opencv-python-headless==4.12.0.88
+      - opencv-python-headless<4.12
       - opentelemetry-api==1.38.0
       - opentelemetry-exporter-prometheus==0.59b0
       - opentelemetry-proto==1.38.0
@@ -353,7 +353,7 @@ dependencies:
       - urllib3==2.5.0
       - uvicorn==0.38.0
       - uvloop==0.22.1
-      - verl==0.7.0.dev0
+      - -e .
       - virtualenv==20.35.4
       - vllm==0.11.0
       - wandb==0.23.0
