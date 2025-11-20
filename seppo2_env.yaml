@@ -156,7 +156,6 @@ dependencies:
       - fastapi-cloud-cli==0.3.1
       - fastrlock==0.8.3
       - filelock==3.20.0
-      - flash-attn==2.8.1
       - flashinfer-python==0.5.2
       - frozendict==2.4.7
       - frozenlist==1.8.0
