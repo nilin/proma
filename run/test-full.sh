@@ -65,7 +65,7 @@ switch-alg-2updates () {
         actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
 	trainer.total_epochs=20 \
     trainer.resume_mode=disable \
-    trainer.project_name='seppo' \
+    trainer.project_name='seppo2' \
     trainer.total_training_steps=102 \
     trainer.n_gpus_per_node=2 \
 	$@
@@ -75,7 +75,7 @@ switch-alg-2updates () {
 
 switch-alg-2updates \
 	+actor_rollout_ref.actor.use_seppo=True \
-	+actor_rollout_ref.actor.seppo_testing=True \
+	+actor_rollout_ref.actor.seppo_testing=False \
 	actor_rollout_ref.actor.optim.optimizer=SGD \
 	actor_rollout_ref.actor.optim.optimizer_impl=torch.optim \
     actor_rollout_ref.actor.optim.lr=2e-5 \

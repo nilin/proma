@@ -726,9 +726,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 g_local.clamp_(-bound, bound)
 
                     if task == get_scalars:
-                        print(f"scales: {scales}")
                         median_scale = torch.quantile(torch.stack([s.flatten() for s in scales]), 0.5).item()
-                        print(f"median scale: {median_scale}")
 
 
                 ################################################################################
