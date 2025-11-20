@@ -97,6 +97,8 @@ class DataParallelPPOActor(BasePPOActor):
             self.install_seppo_hooks()
             self.reset_seppo_stats()
 
+        print(f"self.actor_optimizer: {self.actor_optimizer}")
+
 
     #########################################################
 
