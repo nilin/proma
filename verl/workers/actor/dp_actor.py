@@ -674,136 +674,138 @@ class DataParallelPPOActor(BasePPOActor):
                         break
 
                 ################################################################################
-                get_scalars = "get_scalars"
-                main_task = "main_task"
-                scales = []
-                for task in [get_scalars, main_task]:
-                    for lname, lmod in self.linear_modules.items():
-                        for pname, p in lmod.named_parameters(recurse=False):
-                            dtg = p.grad
-                            if dtg is None:
-                                continue
-                            sl = self.dt_local_global_slices(dtg)
 
-                            if len(sl) != 2:
-                                with torch.no_grad():
-                                    dtg.mul_(0.0)
-                                print(f"WARN: rank {dist.get_rank()} {lname}.{pname} has {len(sl)} dimensions for shard mapping")
-                                continue
+                if self.seppo:
+                    get_scalars = "get_scalars"
+                    main_task = "main_task"
+                    scales = []
+                    for task in [get_scalars, main_task]:
+                        for lname, lmod in self.linear_modules.items():
+                            for pname, p in lmod.named_parameters(recurse=False):
+                                dtg = p.grad
+                                if dtg is None:
+                                    continue
+                                sl = self.dt_local_global_slices(dtg)
 
-                            # Work on local shard tensor; no collectives
-                            g_local = dtg.to_local()
-                            # Select matching per-row/col scalars and align dtype/device
+                                if len(sl) != 2:
+                                    with torch.no_grad():
+                                        dtg.mul_(0.0)
+                                    print(f"WARN: rank {dist.get_rank()} {lname}.{pname} has {len(sl)} dimensions for shard mapping")
+                                    continue
 
-                            # Compute scale in fp32 to avoid precision loss
-                            sq_scale = 0.0
-                            for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
-                                row_scale = g_norm[sl[0]].to(device=g_local.device) ** 2
-                                col_scale = a_norm[sl[1]].to(device=g_local.device) ** 2
+                                # Work on local shard tensor; no collectives
+                                g_local = dtg.to_local()
+                                # Select matching per-row/col scalars and align dtype/device
+
+                                # Compute scale in fp32 to avoid precision loss
+                                sq_scale = 0.0
+                                for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
+                                    row_scale = g_norm[sl[0]].to(device=g_local.device) ** 2
+                                    col_scale = a_norm[sl[1]].to(device=g_local.device) ** 2
+
+                                    if task == get_scalars:
+                                        scales.append(torch.sqrt(row_scale.median() * col_scale.median()))
+                                    else:
+                                        sq_scale = sq_scale + (row_scale[:, None] * col_scale[None, :]) / len(lmod.g_norms)
 
                                 if task == get_scalars:
-                                    scales.append(torch.sqrt(row_scale.median() * col_scale.median()))
-                                else:
-                                    sq_scale = sq_scale + (row_scale[:, None] * col_scale[None, :]) / len(lmod.g_norms)
-
-                            if task == get_scalars:
-                                continue
-                            else:
-                                scale = sq_scale.sqrt()
-
-                            lmod.g_norms.clear()
-                            lmod.a_norms.clear()
-
-                            # Compute scaling in fp32
-                            scale_pre_clamp = scale.clone()
-                            scale = torch.clamp(scale, min=scale.median())
-                            scale = torch.clamp(scale, min=median_scale)
-                            print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
-                            scaling = 1.0 / scale
-
-                            # Broadcasted in-place scaling on the shard
-                            with torch.no_grad():
-                                g_local.mul_(scaling)
-                                bound = 1e4
-                                g_local.clamp_(-bound, bound)
-
-                    if task == get_scalars:
-                        median_scale = torch.quantile(torch.stack([s.flatten() for s in scales]), 0.5).item()
-
-
-                ################################################################################
-                # Optional: dump per-layer Linear parameter grads before optimizer step
-                # If seppo_full_grad=True, gather full unsharded gradients (DTensor -> Replicate) on ALL ranks
-                # and print only on rank 0. Otherwise, print a global L2 norm summary without all-gather.
-                if self.testing and dist.is_available() and dist.is_initialized():
-                    base_module = getattr(
-                        self.actor_module, "module", getattr(self.actor_module, "_fsdp_wrapped_module", self.actor_module)
-                    )
-                    for lname, lmod in base_module.named_modules():
-                        if isinstance(lmod, nn.Linear):
-                            for pname, p in lmod.named_parameters(recurse=False):
-                                g = p.grad
-                                if g is None:
                                     continue
-                                shape = tuple(p.shape)  # global, unsharded param shape
-
-                                # Print shard mapping for DTensor grads (on all ranks) without collectives
-                                if isinstance(g, DTensor):
-                                    sl = self.dt_local_global_slices(g)
-                                    try:
-                                        local_shape = tuple(g.to_local().shape)
-                                    except Exception:
-                                        local_shape = ("?",)
-                                    r = dist.get_rank()
-                                    print(f"[shard map] rank={r} {lname}.{pname} -> global{sl}, local_shape={local_shape}")
-
-                                # Gather full unsharded grad on ALL ranks by redistributing to Replicate
-                                if isinstance(g, DTensor):
-                                    try:
-                                        g_rep = g.redistribute(g.device_mesh, placements=[Replicate()])
-                                        g_full = g_rep.to_local()  # replicated: local tensor is the full grad
-                                    except Exception:
-                                        # Fallback to all-gather via full_tensor on ALL ranks
-                                        g_full = g.full_tensor()
                                 else:
-                                    g_full = g
-                                if dist.get_rank() == 0:
-                                    # Print the entire unsharded gradient tensor (can be very large)
-                                    print(f"[actor grad full] {lname}.{pname}: shape={shape}\n{g_full.detach().cpu()}")
-                ################################################################################
+                                    scale = sq_scale.sqrt()
 
-                # Diagnostics: print first offending grad with non-finite values before optimizer step
-                try:
-                    base_module = getattr(
-                        self.actor_module, "module", getattr(self.actor_module, "_fsdp_wrapped_module", self.actor_module)
-                    )
-                    for pname, p in base_module.named_parameters(recurse=True):
-                        g = p.grad
-                        if g is None:
-                            continue
-                        # Work on local shard for DTensor grads
-                        if isinstance(g, DTensor):
-                            try:
-                                g_local = g.to_local()
-                            except Exception:
-                                # Fallback: best-effort materialization
-                                g_local = g.full_tensor()
-                        else:
-                            g_local = g
-                        finite_mask = torch.isfinite(g_local)
-                        if not finite_mask.all():
-                            n_nan = torch.isnan(g_local).sum().item()
-                            pos_inf = torch.isinf(g_local).logical_and(g_local > 0).sum().item()
-                            neg_inf = torch.isinf(g_local).logical_and(g_local < 0).sum().item()
-                            abs_max = float(g_local[finite_mask].abs().max().item()) if finite_mask.any() else float("nan")
-                            r = dist.get_rank() if dist.is_available() and dist.is_initialized() else -1
-                            print(
-                                f"[grad diag] rank={r} param={pname} dtype={g_local.dtype} local_shape={tuple(g_local.shape)} "
-                                f"nan={n_nan} +inf={pos_inf} -inf={neg_inf} abs_max={abs_max}"
-                            )
-                            break
-                except Exception:
-                    pass
+                                lmod.g_norms.clear()
+                                lmod.a_norms.clear()
+
+                                # Compute scaling in fp32
+                                scale_pre_clamp = scale.clone()
+                                scale = torch.clamp(scale, min=scale.median())
+                                scale = torch.clamp(scale, min=median_scale)
+                                print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
+                                scaling = 1.0 / scale
+
+                                # Broadcasted in-place scaling on the shard
+                                with torch.no_grad():
+                                    g_local.mul_(scaling)
+                                    bound = 1e4
+                                    g_local.clamp_(-bound, bound)
+
+                        if task == get_scalars:
+                            median_scale = torch.quantile(torch.stack([s.flatten() for s in scales]), 0.5).item()
+
+
+                    ################################################################################
+                    # Optional: dump per-layer Linear parameter grads before optimizer step
+                    # If seppo_full_grad=True, gather full unsharded gradients (DTensor -> Replicate) on ALL ranks
+                    # and print only on rank 0. Otherwise, print a global L2 norm summary without all-gather.
+                    if self.testing and dist.is_available() and dist.is_initialized():
+                        base_module = getattr(
+                            self.actor_module, "module", getattr(self.actor_module, "_fsdp_wrapped_module", self.actor_module)
+                        )
+                        for lname, lmod in base_module.named_modules():
+                            if isinstance(lmod, nn.Linear):
+                                for pname, p in lmod.named_parameters(recurse=False):
+                                    g = p.grad
+                                    if g is None:
+                                        continue
+                                    shape = tuple(p.shape)  # global, unsharded param shape
+
+                                    # Print shard mapping for DTensor grads (on all ranks) without collectives
+                                    if isinstance(g, DTensor):
+                                        sl = self.dt_local_global_slices(g)
+                                        try:
+                                            local_shape = tuple(g.to_local().shape)
+                                        except Exception:
+                                            local_shape = ("?",)
+                                        r = dist.get_rank()
+                                        print(f"[shard map] rank={r} {lname}.{pname} -> global{sl}, local_shape={local_shape}")
+
+                                    # Gather full unsharded grad on ALL ranks by redistributing to Replicate
+                                    if isinstance(g, DTensor):
+                                        try:
+                                            g_rep = g.redistribute(g.device_mesh, placements=[Replicate()])
+                                            g_full = g_rep.to_local()  # replicated: local tensor is the full grad
+                                        except Exception:
+                                            # Fallback to all-gather via full_tensor on ALL ranks
+                                            g_full = g.full_tensor()
+                                    else:
+                                        g_full = g
+                                    if dist.get_rank() == 0:
+                                        # Print the entire unsharded gradient tensor (can be very large)
+                                        print(f"[actor grad full] {lname}.{pname}: shape={shape}\n{g_full.detach().cpu()}")
+                    ################################################################################
+
+                    # Diagnostics: print first offending grad with non-finite values before optimizer step
+                    try:
+                        base_module = getattr(
+                            self.actor_module, "module", getattr(self.actor_module, "_fsdp_wrapped_module", self.actor_module)
+                        )
+                        for pname, p in base_module.named_parameters(recurse=True):
+                            g = p.grad
+                            if g is None:
+                                continue
+                            # Work on local shard for DTensor grads
+                            if isinstance(g, DTensor):
+                                try:
+                                    g_local = g.to_local()
+                                except Exception:
+                                    # Fallback: best-effort materialization
+                                    g_local = g.full_tensor()
+                            else:
+                                g_local = g
+                            finite_mask = torch.isfinite(g_local)
+                            if not finite_mask.all():
+                                n_nan = torch.isnan(g_local).sum().item()
+                                pos_inf = torch.isinf(g_local).logical_and(g_local > 0).sum().item()
+                                neg_inf = torch.isinf(g_local).logical_and(g_local < 0).sum().item()
+                                abs_max = float(g_local[finite_mask].abs().max().item()) if finite_mask.any() else float("nan")
+                                r = dist.get_rank() if dist.is_available() and dist.is_initialized() else -1
+                                print(
+                                    f"[grad diag] rank={r} param={pname} dtype={g_local.dtype} local_shape={tuple(g_local.shape)} "
+                                    f"nan={n_nan} +inf={pos_inf} -inf={neg_inf} abs_max={abs_max}"
+                                )
+                                break
+                    except Exception:
+                        pass
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
