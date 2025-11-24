@@ -728,10 +728,12 @@ class DataParallelPPOActor(BasePPOActor):
                                     g_local.mul_(scaling)
                                     bound = 1e4
                                     print(f"g_local clipfrac: {(g_local.abs() > bound).float().mean():.2%}")
+                                    print(f"scale.median(): {scale.median()}")
                                     g_local.clamp_(-bound, bound)
 
                         if task == get_scalars:
                             median_scale = torch.quantile(torch.stack([s.flatten() for s in scales]), 0.5).item()
+                            print(f"overall median scale: {median_scale}")
 
 
                     ################################################################################
