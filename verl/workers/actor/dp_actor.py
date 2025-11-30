@@ -148,8 +148,11 @@ class DataParallelPPOActor(BasePPOActor):
                 g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
                 g_out = g_out / self.loss_scale_factor
 
-                mod.a_norms.append(act_in.float().norm(dim=0) / math.sqrt(act_in.shape[0]))
-                mod.g_norms.append(g_out.float().norm(dim=0) / math.sqrt(g_out.shape[0]))
+                act_in_centered = act_in - act_in.mean(dim=0, keepdim=True)
+                g_out_centered = g_out - g_out.mean(dim=0, keepdim=True)
+
+                mod.a_norms2.append(act_in_centered.float().norm(dim=0).pow(2))
+                mod.g_norms2.append(g_out_centered.float().norm(dim=0).pow(2))
                 #mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
                 #mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
 
@@ -178,8 +181,8 @@ class DataParallelPPOActor(BasePPOActor):
 
     def reset_seppo_stats(self):
         for lname, lmod in self.linear_modules.items():
-            lmod.a_norms = []
-            lmod.g_norms = []
+            lmod.a_norms2 = []
+            lmod.g_norms2 = []
 
     def flatten_response_window(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Flatten non-padding response tokens to (N, ...).
@@ -676,10 +679,8 @@ class DataParallelPPOActor(BasePPOActor):
                 ################################################################################
 
                 if self.seppo:
-                    get_scalars = "get_scalars"
-                    main_task = "main_task"
                     scales = []
-                    for task in [get_scalars, main_task]:
+                    for task in [0]:
                         for lname, lmod in self.linear_modules.items():
                             for pname, p in lmod.named_parameters(recurse=False):
                                 dtg = p.grad
@@ -699,19 +700,13 @@ class DataParallelPPOActor(BasePPOActor):
 
                                 # Compute scale in fp32 to avoid precision loss
                                 sq_scale = 0.0
-                                for g_norm, a_norm in zip(lmod.g_norms, lmod.a_norms):
-                                    row_scale = g_norm[sl[0]].to(device=g_local.device) ** 2
-                                    col_scale = a_norm[sl[1]].to(device=g_local.device) ** 2
+                                for g_norm2, a_norm2 in zip(lmod.g_norms2, lmod.a_norms2):
+                                    row_scale2 = g_norm2[sl[0]].to(device=g_local.device)
+                                    col_scale2 = a_norm2[sl[1]].to(device=g_local.device)
 
-                                    if task == get_scalars:
-                                        scales.append(torch.sqrt(row_scale.median() * col_scale.median()))
-                                    else:
-                                        sq_scale = sq_scale + (row_scale[:, None] * col_scale[None, :]) / len(lmod.g_norms)
+                                    sq_scale = sq_scale + (row_scale2[:, None] * col_scale2[None, :])
 
-                                if task == get_scalars:
-                                    continue
-                                else:
-                                    scale = sq_scale.sqrt()
+                                scale = sq_scale.sqrt()
 
                                 lmod.g_norms.clear()
                                 lmod.a_norms.clear()
@@ -719,7 +714,6 @@ class DataParallelPPOActor(BasePPOActor):
                                 # Compute scaling in fp32
                                 scale_pre_clamp = scale.clone()
                                 scale = torch.clamp(scale, min=scale.median())
-                                scale = torch.clamp(scale, min=median_scale)
                                 print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
                                 scaling = 1.0 / scale
 
@@ -730,11 +724,6 @@ class DataParallelPPOActor(BasePPOActor):
                                     print(f"g_local clipfrac: {(g_local.abs() > bound).float().mean():.2%}")
                                     print(f"scale.median(): {scale.median()}")
                                     g_local.clamp_(-bound, bound)
-
-                        if task == get_scalars:
-                            median_scale = torch.quantile(torch.stack([s.flatten() for s in scales]), 0.5).item()
-                            print(f"overall median scale: {median_scale}")
-
 
                     ################################################################################
                     # Optional: dump per-layer Linear parameter grads before optimizer step
