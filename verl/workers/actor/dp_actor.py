@@ -684,52 +684,50 @@ class DataParallelPPOActor(BasePPOActor):
                 ################################################################################
 
                 if self.seppo:
-                    scales = []
-                    for task in [0]:
-                        for lname, lmod in self.linear_modules.items():
-                            for pname, p in lmod.named_parameters(recurse=False):
-                                dtg = p.grad
-                                if dtg is None:
-                                    continue
-                                sl = self.dt_local_global_slices(dtg)
+                    for lname, lmod in self.linear_modules.items():
+                        for pname, p in lmod.named_parameters(recurse=False):
+                            dtg = p.grad
+                            if dtg is None:
+                                continue
+                            sl = self.dt_local_global_slices(dtg)
 
-                                if len(sl) != 2:
-                                    with torch.no_grad():
-                                        dtg.mul_(0.0)
-                                    print(f"WARN: rank {dist.get_rank()} {lname}.{pname} has {len(sl)} dimensions for shard mapping")
-                                    continue
-
-                                # Work on local shard tensor; no collectives
-                                g_local = dtg.to_local()
-                                # Select matching per-row/col scalars and align dtype/device
-
-                                # Compute scale in fp32 to avoid precision loss
-                                sq_scale = 0.0
-                                for g_norm2, a_norm2 in zip(lmod.g_norms2, lmod.a_norms2):
-                                    row_scale2 = g_norm2[sl[0]].to(device=g_local.device)
-                                    col_scale2 = a_norm2[sl[1]].to(device=g_local.device)
-
-                                    sq_scale = sq_scale + (row_scale2[:, None] * col_scale2[None, :])
-
-                                scale = sq_scale.sqrt()
-
-                                lmod.g_norms2.clear()
-                                lmod.a_norms2.clear()
-
-                                # Compute scaling in fp32
-                                scale_pre_clamp = scale.clone()
-                                scale = torch.clamp(scale, min=scale.median())
-                                print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
-
-                                scaling = 1.0 / scale / math.sqrt(float(self.n_params))
-
-                                # Broadcasted in-place scaling on the shard
+                            if len(sl) != 2:
                                 with torch.no_grad():
-                                    g_local.mul_(scaling)
-                                    bound = 1e4
-                                    print(f"g_local clipfrac: {(g_local.abs() > bound).float().mean():.2%}")
-                                    print(f"scale.median(): {scale.median()}")
-                                    g_local.clamp_(-bound, bound)
+                                    dtg.mul_(0.0)
+                                print(f"WARN: rank {dist.get_rank()} {lname}.{pname} has {len(sl)} dimensions for shard mapping")
+                                continue
+
+                            # Work on local shard tensor; no collectives
+                            g_local = dtg.to_local()
+                            # Select matching per-row/col scalars and align dtype/device
+
+                            # Compute scale in fp32 to avoid precision loss
+                            sq_scale = 0.0
+                            for g_norm2, a_norm2 in zip(lmod.g_norms2, lmod.a_norms2):
+                                row_scale2 = g_norm2[sl[0]].to(device=g_local.device)
+                                col_scale2 = a_norm2[sl[1]].to(device=g_local.device)
+
+                                sq_scale = sq_scale + (row_scale2[:, None] * col_scale2[None, :])
+
+                            scale = sq_scale.sqrt()
+
+                            lmod.g_norms2.clear()
+                            lmod.a_norms2.clear()
+
+                            # Compute scaling in fp32
+                            scale_pre_clamp = scale.clone()
+                            scale = torch.clamp(scale, min=scale.median())
+                            print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
+
+                            scaling = 1.0 / scale / math.sqrt(float(self.n_params))
+
+                            # Broadcasted in-place scaling on the shard
+                            with torch.no_grad():
+                                g_local.mul_(scaling)
+                                bound = 1e4
+                                print(f"g_local clipfrac: {(g_local.abs() > bound).float().mean():.2%}")
+                                print(f"scale.median(): {scale.median()}")
+                                g_local.clamp_(-bound, bound)
 
                     ################################################################################
                     # Optional: dump per-layer Linear parameter grads before optimizer step
