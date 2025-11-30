@@ -113,11 +113,16 @@ class DataParallelPPOActor(BasePPOActor):
         self.linear_modules = {n: sub for n, sub in self.actor_module.named_modules() if isinstance(sub, nn.Linear)}
         # Map original params to their owning linear module for quick lookup
         self._seppo_param_to_module = {}
+        self.n_params = 0
         for _, m in self.linear_modules.items():
             if hasattr(m, "weight") and isinstance(m.weight, torch.nn.Parameter):
                 self._seppo_param_to_module[m.weight] = m
+                self.n_params += m.weight.numel()
+                print(f"registered weight {m.weight.numel()} params")
             if hasattr(m, "bias") and isinstance(m.bias, torch.nn.Parameter) and m.bias is not None:
                 self._seppo_param_to_module[m.bias] = m
+                self.n_params += m.bias.numel()
+                print(f"registered bias {m.bias.numel()} params")
 
         for lname, lmod in self.linear_modules.items():
             # storage on module
@@ -715,7 +720,8 @@ class DataParallelPPOActor(BasePPOActor):
                                 scale_pre_clamp = scale.clone()
                                 scale = torch.clamp(scale, min=scale.median())
                                 print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
-                                scaling = 1.0 / scale
+
+                                scaling = 1.0 / scale / math.sqrt(float(self.n_params))
 
                                 # Broadcasted in-place scaling on the shard
                                 with torch.no_grad():
