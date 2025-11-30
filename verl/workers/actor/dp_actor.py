@@ -138,10 +138,10 @@ class DataParallelPPOActor(BasePPOActor):
                     mod._seppo_act_in = None
 
             # Full backward hook to compute a scalar using act_in and grad_out
-            def _bwd_hook(mod, _grad_input, _grad_output):
+            def _bwd_hook(mod, grad_input, grad_output):
                 act_in = mod._seppo_act_in.clone()
-                grad_output = _grad_output.clone()
-                g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
+                _g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
+                g_out = _g_out.clone()
 
                 # Explicitly remove a leading singleton (e.g., [1, T, D] -> [T, D])
                 if act_in.dim() >= 3 and act_in.size(0) == 1:
