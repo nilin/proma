@@ -727,6 +727,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 bound = 1e4
                                 print(f"g_local clipfrac: {(g_local.abs() > bound).float().mean():.2%}")
                                 print(f"scale.median(): {scale.median()}")
+                                print(f"scaling.median(): {scaling.median()}")
                                 g_local.clamp_(-bound, bound)
 
                     ################################################################################
