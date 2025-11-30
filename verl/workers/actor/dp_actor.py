@@ -713,8 +713,8 @@ class DataParallelPPOActor(BasePPOActor):
 
                                 scale = sq_scale.sqrt()
 
-                                lmod.g_norms.clear()
-                                lmod.a_norms.clear()
+                                lmod.g_norms2.clear()
+                                lmod.a_norms2.clear()
 
                                 # Compute scaling in fp32
                                 scale_pre_clamp = scale.clone()
