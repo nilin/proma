@@ -165,29 +165,6 @@ class DataParallelPPOActor(BasePPOActor):
                 mod.a_proj += self.projection_block.T @ act_in_centered
                 mod.g_proj += self.projection_block.T @ g_out_centered
 
-                #mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
-                #mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
-
-                #if self.testing:
-                #    if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
-                #        print(f"mod.a_norm: {mod.a_norm}")
-                #        print(f"mod.g_norm: {mod.g_norm}")
-                #        print(f"mod.a_scaling: {mod.a_scaling}")
-                #        print(f"mod.g_scaling: {mod.g_scaling}")
-
-            # Parameter hooks to allow assigning or scaling gradients for weight and bias
-            def _make_weight_hook(mod):
-                def _hook(grad):
-                    grad = mod.g_scaling[:, None] * mod.a_scaling[None, :] * grad
-                    return grad
-                return _hook
-
-            def _make_bias_hook(mod):
-                def _hook(grad):
-                    grad = mod.g_scaling * grad
-                    return grad
-                return _hook
-
             lmod.register_forward_hook(_fwd_hook)
             lmod.register_full_backward_hook(_bwd_hook)
 
@@ -195,14 +172,8 @@ class DataParallelPPOActor(BasePPOActor):
         for lname, lmod in self.linear_modules.items():
             lmod.a_norms2 = []
             lmod.g_norms2 = []
-            lmod.a_proj = torch.zeros(
-                lmod.in_features, self.random_projection_dim, 
-                device=self.device_name, dtype=torch.bfloat16
-            )
-            lmod.g_proj = torch.zeros(
-                lmod.out_features, self.random_projection_dim, 
-                device=self.device_name, dtype=torch.bfloat16
-            )
+            lmod.a_proj = 0.0
+            lmod.g_proj = 0.0
 
     def flatten_response_window(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Flatten non-padding response tokens to (N, ...).
@@ -278,7 +249,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         n_samples = sum(mb_sizes)
 
-        rand = torch.randn(n_samples, self.random_projection_dim, device=self.device_name)
+        rand = torch.randn(n_samples, self.random_projection_dim, device=self.device_name, dtype=torch.bfloat16)
         projection, S, _ = torch.linalg.svd(rand, full_matrices=False)
 
         return projection.split(mb_sizes)
