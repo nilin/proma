@@ -114,7 +114,7 @@ class ActorConfig(BaseConfig):
     use_seppo: bool = False
     seppo_testing: bool = False
     seppo_static_fraction: float = 0.5
-    random_projection_dim: int = 32
+    seppo_dim: int = 32
     seppo_mult_scale: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False

@@ -93,7 +93,9 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo = self.config.get("use_seppo", False)
         self.testing = self.config.get("seppo_testing", False)
         self.seppo_static_fraction = self.config.get("seppo_static_fraction", 0.5)
-        self.random_projection_dim = self.config.get("random_projection_dim", 32)
+        self.seppo_dim = self.config.get("seppo_dim", 32)
+        self.projection_dim_margin = 8
+        self.random_projection_dim = self.seppo_dim + self.projection_dim_margin
         self.mult_scale = self.config.get("seppo_mult_scale", False)
 
         if self.seppo:
@@ -719,7 +721,8 @@ class DataParallelPPOActor(BasePPOActor):
                                 proj = scale * proj
 
                                 U, S, V = torch.linalg.svd(proj, full_matrices=False)
-                                preconditioner = S.min() / (S + 1e-8)
+                                minscale = S[self.seppo_dim-1]
+                                preconditioner = minscale / (torch.clamp(S, min=minscale) + 1e-8)
                                 diag = preconditioner - 1.0
 
                                 return grad + ((grad @ V.T) * diag) @ V
