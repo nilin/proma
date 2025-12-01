@@ -93,6 +93,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo = self.config.get("use_seppo", False)
         self.testing = self.config.get("seppo_testing", False)
         self.seppo_static_fraction = self.config.get("seppo_static_fraction", 0.5)
+        self.random_projection_dim = self.config.get("random_projection_dim", 32)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -194,8 +195,14 @@ class DataParallelPPOActor(BasePPOActor):
         for lname, lmod in self.linear_modules.items():
             lmod.a_norms2 = []
             lmod.g_norms2 = []
-            lmod.a_proj = 0.0
-            lmod.g_proj = 0.0
+            lmod.a_proj = torch.zeros(
+                lmod.in_features, self.random_projection_dim, 
+                device=self.device_name, dtype=torch.bfloat16
+            )
+            lmod.g_proj = torch.zeros(
+                lmod.out_features, self.random_projection_dim, 
+                device=self.device_name, dtype=torch.bfloat16
+            )
 
     def flatten_response_window(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Flatten non-padding response tokens to (N, ...).
@@ -271,7 +278,6 @@ class DataParallelPPOActor(BasePPOActor):
 
         n_samples = sum(mb_sizes)
 
-        self.random_projection_dim = 32
         rand = torch.randn(n_samples, self.random_projection_dim, device=self.device_name)
         projection, S, _ = torch.linalg.svd(rand, full_matrices=False)
 
