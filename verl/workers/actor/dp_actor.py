@@ -707,6 +707,34 @@ class DataParallelPPOActor(BasePPOActor):
                             g_local = dtg.to_local()
                             # Select matching per-row/col scalars and align dtype/device
 
+                            g_norm2_sum = torch.sum(torch.stack(lmod.g_norms2), dim=0)[sl[0]]
+                            a_norm2_sum = torch.sum(torch.stack(lmod.a_norms2), dim=0)[sl[1]]
+
+                            out_scale = 1.0 / (g_norm2_sum.sqrt() + 1e-4)
+                            in_scale = 1.0 / (a_norm2_sum.sqrt() + 1e-4)
+
+                            def precondition(grad, scale, proj, mode="right"):
+                                if mode == "left":
+                                    return precondition(grad.T, scale, proj, mode="right").T
+
+                                grad = scale * grad
+                                proj = scale * proj
+
+                                U, S, V = torch.linalg.svd(proj, full_matrices=False)
+                                preconditioner = S.min() / (S + 1e-8)
+                                diag = preconditioner - 1.0
+
+                                return grad + ((grad @ V.T) * diag) @ V
+
+                            grad_transformed = g_local.clone()
+                            grad_transformed = precondition(grad_transformed, out_scale, lmod.g_proj, mode="left")
+                            grad_transformed = precondition(grad_transformed, in_scale, lmod.a_proj, mode="right")
+
+                            with torch.no_grad():
+                                g_local.copy_(grad_transformed)
+
+                            continue
+
                             # Compute scale in fp32 to avoid precision loss
                             sq_scale = 0.0
                             for g_norm2, a_norm2 in zip(lmod.g_norms2, lmod.a_norms2):
