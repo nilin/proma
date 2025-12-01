@@ -160,6 +160,10 @@ class DataParallelPPOActor(BasePPOActor):
 
                 mod.a_norms2.append(act_in_centered.float().norm(dim=0).pow(2))
                 mod.g_norms2.append(g_out_centered.float().norm(dim=0).pow(2))
+
+                mod.a_proj += self.projection_block.T @ act_in_centered
+                mod.g_proj += self.projection_block.T @ g_out_centered
+
                 #mod.a_scaling = 1.0 / (mod.a_norm + 1e-6 * mod.a_norm.mean())
                 #mod.g_scaling = 1.0 / (mod.g_norm + 1e-6 * mod.g_norm.mean())
 
@@ -253,6 +257,16 @@ class DataParallelPPOActor(BasePPOActor):
                 continue
 
         return tuple(slices)
+
+    def get_random_projections(self, micro_batches):
+        mb_sizes = [mb["responses"].shape[0] for mb in micro_batches]
+        n_samples = sum(mb_sizes)
+
+        self.random_projection_dim = 100
+        rand = torch.randn(n_samples, self.random_projection_dim, device=self.device_name)
+        projection, S, _ = torch.linalg.svd(rand, full_matrices=False)
+
+        return projection.split(mb_sizes)
 
     #########################################################
 
@@ -567,6 +581,7 @@ class DataParallelPPOActor(BasePPOActor):
         metrics = {}
         for _ in range(self.config.ppo_epochs):
             for batch_idx, mini_batch in enumerate(mini_batches):
+
                 if self.config.use_dynamic_bsz:
                     max_token_len = self.config.ppo_max_token_len_per_gpu * self.ulysses_sequence_parallel_size
                     micro_batches, _ = prepare_dynamic_batch(mini_batch, max_token_len=max_token_len)
@@ -576,9 +591,12 @@ class DataParallelPPOActor(BasePPOActor):
                     )
                     micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
+                self.projections = self.get_random_projections(micro_batches)
+
                 self.actor_optimizer.zero_grad()
 
-                for micro_batch in micro_batches:
+                for mb_idx, micro_batch in enumerate(micro_batches):
+                    self.projection_block = self.projections[mb_idx]
                     micro_batch = micro_batch.to(get_device_id())
                     micro_batch_metrics = {}
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
