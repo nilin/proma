@@ -92,6 +92,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         self.seppo = self.config.get("use_seppo", False)
         self.testing = self.config.get("seppo_testing", False)
+        self.seppo_static_fraction = self.config.get("seppo_static_fraction", 0.5)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -717,7 +718,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                             # Compute scaling in fp32
                             scale_pre_clamp = scale.clone()
-                            scale = torch.clamp(scale, min=scale.median())
+                            scale = torch.clamp(scale, min=scale.quantile(self.seppo_static_fraction))
                             print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
 
                             scaling = 1.0 / scale / math.sqrt(float(self.n_params))
