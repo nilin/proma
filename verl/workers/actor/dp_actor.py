@@ -734,12 +734,12 @@ class DataParallelPPOActor(BasePPOActor):
                             lmod.g_norms2.clear()
                             lmod.a_norms2.clear()
 
-                            # Compute scaling in fp32
                             scale_pre_clamp = scale.clone()
-                            scale = torch.clamp(scale, min=scale.quantile(self.seppo_static_fraction))
+                            #scale = torch.clamp(scale, min=scale.quantile(self.seppo_static_fraction))
                             print(f"{(scale>scale_pre_clamp).float().mean():.2%} of scales were clamped")
 
-                            scaling = 1.0 / scale / math.sqrt(float(self.n_params))
+                            self.eps = 1e-8
+                            scaling = 1.0 / (scale * math.sqrt(float(self.n_params)) + self.eps)
 
                             # Broadcasted in-place scaling on the shard
                             with torch.no_grad():
