@@ -94,6 +94,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.testing = self.config.get("seppo_testing", False)
         self.seppo_static_fraction = self.config.get("seppo_static_fraction", 0.5)
         self.random_projection_dim = self.config.get("random_projection_dim", 32)
+        self.mult_scale = self.config.get("seppo_mult_scale", False)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -710,9 +711,6 @@ class DataParallelPPOActor(BasePPOActor):
                             g_norm2_sum = torch.sum(torch.stack(lmod.g_norms2), dim=0)[sl[0]]
                             a_norm2_sum = torch.sum(torch.stack(lmod.a_norms2), dim=0)[sl[1]]
 
-                            out_scale = 1.0 / (g_norm2_sum.sqrt() + 1e-4)
-                            in_scale = 1.0 / (a_norm2_sum.sqrt() + 1e-4)
-
                             def precondition(grad, scale, proj, mode="right"):
                                 if mode == "left":
                                     return precondition(grad.T, scale, proj, mode="right").T
@@ -726,9 +724,19 @@ class DataParallelPPOActor(BasePPOActor):
 
                                 return grad + ((grad @ V.T) * diag) @ V
 
+                            if self.mult_scale:
+                                out_scale = 1.0 / (g_norm2_sum.sqrt() + 1e-4)
+                                in_scale = 1.0 / (a_norm2_sum.sqrt() + 1e-4)
+                                post_scale = 1.0 / math.sqrt(float(self.n_params))
+                            else:
+                                out_scale = torch.ones_like(g_norm2_sum)
+                                in_scale = torch.ones_like(a_norm2_sum)
+                                post_scale = 1.0
+
                             grad_transformed = g_local.clone()
                             grad_transformed = precondition(grad_transformed, out_scale, lmod.g_proj[:,sl[0]], mode="left")
                             grad_transformed = precondition(grad_transformed, in_scale, lmod.a_proj[:,sl[1]], mode="right")
+                            grad_transformed = grad_transformed * post_scale
 
                             with torch.no_grad():
                                 g_local.copy_(grad_transformed)
