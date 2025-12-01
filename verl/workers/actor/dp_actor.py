@@ -259,7 +259,9 @@ class DataParallelPPOActor(BasePPOActor):
         return tuple(slices)
 
     def get_random_projections(self, micro_batches):
-        mb_sizes = [mb["responses"].shape[0] for mb in micro_batches]
+        # Each element in micro_batches is a DataProto. Access tensors via .batch
+        # rather than string-indexing the DataProto itself.
+        mb_sizes = [mb.batch["responses"].shape[0] for mb in micro_batches]
         n_samples = sum(mb_sizes)
 
         self.random_projection_dim = 100
