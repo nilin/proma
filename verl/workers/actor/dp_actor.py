@@ -162,8 +162,8 @@ class DataParallelPPOActor(BasePPOActor):
                 mod.a_norms2.append(act_in_centered.float().norm(dim=0).pow(2))
                 mod.g_norms2.append(g_out_centered.float().norm(dim=0).pow(2))
 
-                mod.a_proj += self.projection_block.T @ act_in_centered
-                mod.g_proj += self.projection_block.T @ g_out_centered
+                mod.a_proj += self.projection_block.T @ act_in_centered.to(dtype=torch.float32)
+                mod.g_proj += self.projection_block.T @ g_out_centered.to(dtype=torch.float32)
 
             lmod.register_forward_hook(_fwd_hook)
             lmod.register_full_backward_hook(_bwd_hook)
@@ -249,7 +249,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         n_samples = sum(mb_sizes)
 
-        rand = torch.randn(n_samples, self.random_projection_dim, device=self.device_name, dtype=torch.bfloat16)
+        rand = torch.randn(n_samples, self.random_projection_dim, device=self.device_name)
         projection, S, _ = torch.linalg.svd(rand, full_matrices=False)
 
         return projection.split(mb_sizes)
