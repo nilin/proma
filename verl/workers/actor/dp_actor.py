@@ -263,10 +263,15 @@ class DataParallelPPOActor(BasePPOActor):
     def get_random_projections(self, micro_batches):
         # Each element in micro_batches is a DataProto. Access tensors via .batch
         # rather than string-indexing the DataProto itself.
-        mb_sizes = [mb.batch["responses"].shape[0] for mb in micro_batches]
+        mb_sizes = []
+
+        for micro_batch in micro_batches:
+            model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+            mb_sizes.append(int(model_inputs["attention_mask"].sum()))
+
         n_samples = sum(mb_sizes)
 
-        self.random_projection_dim = 100
+        self.random_projection_dim = 32
         rand = torch.randn(n_samples, self.random_projection_dim, device=self.device_name)
         projection, S, _ = torch.linalg.svd(rand, full_matrices=False)
 
