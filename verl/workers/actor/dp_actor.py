@@ -194,6 +194,8 @@ class DataParallelPPOActor(BasePPOActor):
         for lname, lmod in self.linear_modules.items():
             lmod.a_norms2 = []
             lmod.g_norms2 = []
+            lmod.a_proj = 0.0
+            lmod.g_proj = 0.0
 
     def flatten_response_window(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Flatten non-padding response tokens to (N, ...).
