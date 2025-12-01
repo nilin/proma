@@ -727,8 +727,8 @@ class DataParallelPPOActor(BasePPOActor):
                                 return grad + ((grad @ V.T) * diag) @ V
 
                             grad_transformed = g_local.clone()
-                            grad_transformed = precondition(grad_transformed, out_scale, lmod.g_proj[sl[0]], mode="left")
-                            grad_transformed = precondition(grad_transformed, in_scale, lmod.a_proj[sl[1]], mode="right")
+                            grad_transformed = precondition(grad_transformed, out_scale, lmod.g_proj[:,sl[0]], mode="left")
+                            grad_transformed = precondition(grad_transformed, in_scale, lmod.a_proj[:,sl[1]], mode="right")
 
                             with torch.no_grad():
                                 g_local.copy_(grad_transformed)
