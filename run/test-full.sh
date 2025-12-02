@@ -72,9 +72,8 @@ switch-alg-2updates () {
 switch-alg-2updates \
 	+actor_rollout_ref.actor.use_seppo=True \
 	+actor_rollout_ref.actor.seppo_testing=False \
-	actor_rollout_ref.actor.optim.optimizer=SGD \
-	actor_rollout_ref.actor.optim.optimizer_impl=torch.optim \
-    actor_rollout_ref.actor.optim.lr=2e-5 \
+    +actor_rollout_ref.actor.seppo_scale_mode=temporary \
+    actor_rollout_ref.actor.optim.lr=2e-6 \
     trainer.val_before_train=True \
     actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
 	actor_rollout_ref.actor.strategy=fsdp2 \
@@ -82,12 +81,25 @@ switch-alg-2updates \
     trainer.experiment_name=TEST-FULL 
 
 switch-alg-2updates \
-    actor_rollout_ref.actor.optim.lr=2e-6 \
+	+actor_rollout_ref.actor.use_seppo=True \
+	+actor_rollout_ref.actor.seppo_testing=False \
+    +actor_rollout_ref.actor.seppo_scale_mode=mult \
+	actor_rollout_ref.actor.optim.optimizer=SGD \
+	actor_rollout_ref.actor.optim.optimizer_impl=torch.optim \
+    actor_rollout_ref.actor.optim.lr=0.2 \
     trainer.val_before_train=True \
     actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
 	actor_rollout_ref.actor.strategy=fsdp2 \
 	critic.strategy=fsdp2 \
-    trainer.experiment_name=GRPO
+    trainer.experiment_name=TEST-FULL 
+
+#switch-alg-2updates \
+#    actor_rollout_ref.actor.optim.lr=2e-6 \
+#    trainer.val_before_train=True \
+#    actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
+#	actor_rollout_ref.actor.strategy=fsdp2 \
+#	critic.strategy=fsdp2 \
+#    trainer.experiment_name=GRPO
 
     #actor_rollout_ref.actor.clip_ratio=1e9 \
     #actor_rollout_ref.actor.clip_ratio_high=1e9 \

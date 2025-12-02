@@ -96,7 +96,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_dim = self.config.get("seppo_dim", 32)
         self.projection_dim_margin = 8
         self.random_projection_dim = self.seppo_dim + self.projection_dim_margin
-        self.mult_scale = self.config.get("seppo_mult_scale", False)
+        self.seppo_scale_mode = self.config.get("seppo_scale_mode", "temporary")
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -727,14 +727,21 @@ class DataParallelPPOActor(BasePPOActor):
 
                                 return grad + ((grad @ V.T) * diag) @ V
 
-                            if self.mult_scale:
-                                out_scale = 1.0 / (g_norm2_sum.sqrt() + 1e-4)
-                                in_scale = 1.0 / (a_norm2_sum.sqrt() + 1e-4)
-                                post_scale = 1.0 / math.sqrt(float(self.n_params))
-                            else:
-                                out_scale = torch.ones_like(g_norm2_sum)
-                                in_scale = torch.ones_like(a_norm2_sum)
-                                post_scale = 1.0
+                            match self.seppo_scale_mode:
+                                case "mult":
+                                    out_scale = 1.0 / (g_norm2_sum.sqrt() + 1e-6)
+                                    in_scale = 1.0 / (a_norm2_sum.sqrt() + 1e-6)
+                                    post_scale = 1.0 / math.sqrt(float(self.n_params))
+                                case "temporary":
+                                    out_scale = 1.0 / (g_norm2_sum.sqrt() + 1e-6)
+                                    in_scale = 1.0 / (a_norm2_sum.sqrt() + 1e-6)
+                                    post_scale = g_norm2_sum.sqrt()[:, None] * a_norm2_sum.sqrt()[None, :]
+                                case "none":
+                                    out_scale = torch.ones_like(g_norm2_sum)
+                                    in_scale = torch.ones_like(a_norm2_sum)
+                                    post_scale = 1.0
+                                case _:
+                                    raise ValueError(f"Invalid seppo_scale_mode: {self.seppo_scale_mode}")
 
                             grad_transformed = g_local.clone()
                             grad_transformed = precondition(grad_transformed, out_scale, lmod.g_proj[:,sl[0]], mode="left")

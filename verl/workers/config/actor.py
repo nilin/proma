@@ -115,7 +115,7 @@ class ActorConfig(BaseConfig):
     seppo_testing: bool = False
     seppo_static_fraction: float = 0.5
     seppo_dim: int = 32
-    seppo_mult_scale: bool = False
+    seppo_scale_mode: str = "temporary"
     ppo_epochs: int = 1
     shuffle: bool = False
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
