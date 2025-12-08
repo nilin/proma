@@ -739,7 +739,7 @@ class DataParallelPPOActor(BasePPOActor):
                                     preconditioner[:self.seppo_dim] = torch.linspace(self.seppo_min_preconditioner, 1.0, self.seppo_dim) 
 
                                 else:
-                                    minscale = self.get_ema(f"seppo_minscale_{lname}", S[self.seppo_dim-1], self.seppo_ema_decay)
+                                    minscale = self.get_ema(f"seppo_minscale_{lname}_{mode}", S[self.seppo_dim-1], self.seppo_ema_decay)
                                     preconditioner = minscale / (torch.clamp(S, min=minscale) + 1e-8)
                                     print(f"preconditioner min before clamp by {self.seppo_min_preconditioner}: {torch.min(preconditioner)}")
                                     preconditioner = torch.clamp(preconditioner, min=self.seppo_min_preconditioner)
