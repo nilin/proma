@@ -100,6 +100,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_ema_decay = self.config.get("seppo_ema_decay", 0.8)
         self.seppo_min_preconditioner = self.config.get("seppo_min_preconditioner", 0.2)
         self.seppo_linear_interpolation = self.config.get("seppo_linear_interpolation", False)
+        self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -726,6 +727,11 @@ class DataParallelPPOActor(BasePPOActor):
                             a_norm2_sum = torch.sum(torch.stack(lmod.a_norms2), dim=0)[sl[1]]
 
                             def precondition(grad, scale, proj, mode="right", actual_mode=None):
+
+                                if len(scale) > self.seppo_len_lim:
+                                    print(f"skipping {actual_mode} seppo for {lname} with dim {grad.shape} because len(scale) > {self.seppo_len_lim}")
+                                    return grad
+
                                 if mode == "left":
                                     return precondition(grad.T, scale, proj, mode="right", actual_mode="left").T
 

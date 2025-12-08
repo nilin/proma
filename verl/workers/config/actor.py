@@ -119,6 +119,7 @@ class ActorConfig(BaseConfig):
     seppo_ema_decay: float = 0.8
     seppo_min_preconditioner: float = 0.2
     seppo_linear_interpolation: bool = False
+    seppo_len_lim: int = 6000
     ppo_epochs: int = 1
     shuffle: bool = False
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
