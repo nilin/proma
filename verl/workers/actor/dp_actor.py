@@ -725,9 +725,12 @@ class DataParallelPPOActor(BasePPOActor):
                             g_norm2_sum = torch.sum(torch.stack(lmod.g_norms2), dim=0)[sl[0]]
                             a_norm2_sum = torch.sum(torch.stack(lmod.a_norms2), dim=0)[sl[1]]
 
-                            def precondition(grad, scale, proj, mode="right"):
+                            def precondition(grad, scale, proj, mode="right", actual_mode=None):
                                 if mode == "left":
-                                    return precondition(grad.T, scale, proj, mode="right").T
+                                    return precondition(grad.T, scale, proj, mode="right", actual_mode="left").T
+
+                                if actual_mode is None:
+                                    actual_mode = mode
 
                                 grad = scale * grad
                                 proj = scale * proj
@@ -739,7 +742,7 @@ class DataParallelPPOActor(BasePPOActor):
                                     preconditioner[:self.seppo_dim] = torch.linspace(self.seppo_min_preconditioner, 1.0, self.seppo_dim) 
 
                                 else:
-                                    minscale = self.get_ema(f"seppo_minscale_{lname}_{mode}", S[self.seppo_dim-1], self.seppo_ema_decay)
+                                    minscale = self.get_ema(f"seppo_minscale_{lname}_{actual_mode}", S[self.seppo_dim-1], self.seppo_ema_decay)
                                     preconditioner = minscale / (torch.clamp(S, min=minscale) + 1e-8)
                                     print(f"preconditioner min before clamp by {self.seppo_min_preconditioner}: {torch.min(preconditioner)}")
                                     preconditioner = torch.clamp(preconditioner, min=self.seppo_min_preconditioner)
