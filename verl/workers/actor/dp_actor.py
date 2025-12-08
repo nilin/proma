@@ -98,7 +98,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.random_projection_dim = self.seppo_dim + self.projection_dim_margin
         self.seppo_scale_mode = self.config.get("seppo_scale_mode", "temporary")
         self.seppo_ema_decay = self.config.get("seppo_ema_decay", 0.8)
-        self.seppo_min_preconditioner = self.config.get("seppo_min_preconditioner", 0.1)
+        self.seppo_min_preconditioner = self.config.get("seppo_min_preconditioner", 0.2)
         self.seppo_linear_interpolation = self.config.get("seppo_linear_interpolation", False)
 
         if self.seppo:

@@ -63,7 +63,7 @@ switch-alg-2updates () {
     trainer.resume_mode=disable \
     trainer.project_name='seppo2' \
     trainer.total_training_steps=102 \
-    trainer.n_gpus_per_node=2 \
+    trainer.n_gpus_per_node=1 \
 	$@
 
     bash run/next.sh
@@ -72,7 +72,11 @@ switch-alg-2updates () {
 switch-alg-2updates \
 	+actor_rollout_ref.actor.use_seppo=True \
 	+actor_rollout_ref.actor.seppo_testing=False \
-    +actor_rollout_ref.actor.seppo_scale_mode=temporary \
+    +actor_rollout_ref.actor.seppo_scale_mode=none \
+    +actor_rollout_ref.actor.seppo_dim=64 \
+    +actor_rollout_ref.actor.seppo_ema_decay=0.0 \
+    +actor_rollout_ref.actor.seppo_min_preconditioner=0.2 \
+    +actor_rollout_ref.actor.seppo_linear_interpolation=False \
     actor_rollout_ref.actor.optim.lr=2e-6 \
     trainer.val_before_train=True \
     actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
@@ -80,18 +84,18 @@ switch-alg-2updates \
 	critic.strategy=fsdp2 \
     trainer.experiment_name=TEST-FULL 
 
-switch-alg-2updates \
-	+actor_rollout_ref.actor.use_seppo=True \
-	+actor_rollout_ref.actor.seppo_testing=False \
-    +actor_rollout_ref.actor.seppo_scale_mode=mult \
-	actor_rollout_ref.actor.optim.optimizer=SGD \
-	actor_rollout_ref.actor.optim.optimizer_impl=torch.optim \
-    actor_rollout_ref.actor.optim.lr=0.2 \
-    trainer.val_before_train=True \
-    actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
-	actor_rollout_ref.actor.strategy=fsdp2 \
-	critic.strategy=fsdp2 \
-    trainer.experiment_name=TEST-FULL 
+#switch-alg-2updates \
+#	+actor_rollout_ref.actor.use_seppo=True \
+#	+actor_rollout_ref.actor.seppo_testing=False \
+#    +actor_rollout_ref.actor.seppo_scale_mode=mult \
+#	actor_rollout_ref.actor.optim.optimizer=SGD \
+#	actor_rollout_ref.actor.optim.optimizer_impl=torch.optim \
+#    actor_rollout_ref.actor.optim.lr=0.2 \
+#    trainer.val_before_train=True \
+#    actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
+#	actor_rollout_ref.actor.strategy=fsdp2 \
+#	critic.strategy=fsdp2 \
+#    trainer.experiment_name=TEST-FULL 
 
 #switch-alg-2updates \
 #    actor_rollout_ref.actor.optim.lr=2e-6 \
