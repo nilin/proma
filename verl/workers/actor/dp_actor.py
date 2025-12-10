@@ -163,7 +163,12 @@ class DataParallelPPOActor(BasePPOActor):
 
                 if dump:
                     print(f"dumping tensors for {lname}")
-                    self.dump_tensors(act_in_centered=act_in_centered, g_out_centered=g_out_centered, a_proj=mod.a_proj, g_proj=mod.g_proj, projection_block=self.projection_block)
+                    self.dump_tensors({
+                        f"act_in_centered_{lname}": act_in_centered,
+                        f"g_out_centered_{lname}": g_out_centered,
+                        f"a_proj_{lname}": mod.a_proj,
+                        f"g_proj_{lname}": mod.g_proj,
+                        f"projection_block_{lname}": self.projection_block})
 
             if self.testing and i in [8,16,32,64,128]:
                 import functools
