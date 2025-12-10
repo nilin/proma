@@ -97,7 +97,6 @@ switch-alg-2updates \
     actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
 	actor_rollout_ref.actor.strategy=fsdp2 \
 	critic.strategy=fsdp2 \
-    trainer.project_name='seppo-noclip' \
     trainer.experiment_name=seppo-noclip \
     actor_rollout_ref.actor.clip_ratio=1e9 \
     actor_rollout_ref.actor.clip_ratio_high=1e9 \
