@@ -136,7 +136,7 @@ class DataParallelPPOActor(BasePPOActor):
                     mod._seppo_act_in = None
 
             # Full backward hook to compute a scalar using act_in and grad_out
-            def _bwd_hook(mod, grad_input, grad_output):
+            def _bwd_hook(mod, grad_input, grad_output, dump=False, lname=None):
                 act_in = mod._seppo_act_in.clone()
                 _g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
                 g_out = _g_out.clone()
@@ -161,12 +161,17 @@ class DataParallelPPOActor(BasePPOActor):
                 mod.a_proj += self.projection_block.T @ act_in_centered.to(dtype=torch.float32)
                 mod.g_proj += self.projection_block.T @ g_out_centered.to(dtype=torch.float32)
 
-                if self.testing and i == len(self.linear_modules)//2:
+                if dump:
                     print(f"dumping tensors for {lname}")
-                    self.dump_tensors(act_in_centered=act_in_centered, g_out_centered=g_out_centered, a_proj=mod.a_proj, g_proj=mod.g_proj)
+                    self.dump_tensors(act_in_centered=act_in_centered, g_out_centered=g_out_centered, a_proj=mod.a_proj, g_proj=mod.g_proj, projection_block=self.projection_block)
 
-            lmod.register_forward_hook(_fwd_hook)
-            lmod.register_full_backward_hook(_bwd_hook)
+            if self.testing and i in [8,16,32,64,128]:
+                import functools
+                lmod.register_forward_hook(_fwd_hook)
+                lmod.register_full_backward_hook(functools.partial(_bwd_hook, dump=True, lname=lname))
+            else:
+                lmod.register_forward_hook(_fwd_hook)
+                lmod.register_full_backward_hook(_bwd_hook)
 
     def reset_seppo_stats(self):
         for lname, lmod in self.linear_modules.items():
