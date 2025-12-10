@@ -100,6 +100,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_ema_decay = self.config.get("seppo_ema_decay", 0.8)
         self.seppo_min_preconditioner = self.config.get("seppo_min_preconditioner", 0.2)
         self.seppo_linear_interpolation = self.config.get("seppo_linear_interpolation", False)
+        self.seppo_squared = self.config.get("seppo_squared", False)
         self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
 
         if self.seppo:
@@ -748,10 +749,17 @@ class DataParallelPPOActor(BasePPOActor):
                                     preconditioner[:self.seppo_dim] = torch.linspace(self.seppo_min_preconditioner, 1.0, self.seppo_dim) 
 
                                 else:
-                                    minscale = self.get_ema(f"seppo_minscale_{lname}_{actual_mode}", S[self.seppo_dim-1], self.seppo_ema_decay)
-                                    preconditioner = minscale / (torch.clamp(S, min=minscale) + 1e-8)
-                                    print(f"preconditioner min before clamp by {self.seppo_min_preconditioner}: {torch.min(preconditioner)}")
-                                    preconditioner = torch.clamp(preconditioner, min=self.seppo_min_preconditioner)
+                                    # minscale = self.get_ema(f"seppo_minscale_{lname}_{actual_mode}", S[self.seppo_dim-1], self.seppo_ema_decay)
+                                    # preconditioner = minscale / (torch.clamp(S, min=minscale) + 1e-8)
+                                    # print(f"preconditioner min before clamp by {self.seppo_min_preconditioner}: {torch.min(preconditioner)}")
+                                    # preconditioner = torch.clamp(preconditioner, min=self.seppo_min_preconditioner)
+
+                                    _scale = self.get_ema(f"seppo_scale_{lname}_{actual_mode}", S[0], self.seppo_ema_decay)
+                                    if self.seppo_squared:
+                                        preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8)).pow(2)
+                                    else:
+                                        preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8))
+                                    preconditioner = torch.clamp(preconditioner, 0, 1)
 
                                 diag = preconditioner - 1.0
 
