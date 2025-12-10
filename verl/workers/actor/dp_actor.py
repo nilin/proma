@@ -161,7 +161,7 @@ class DataParallelPPOActor(BasePPOActor):
                 mod.a_proj += self.projection_block.T @ act_in_centered.to(dtype=torch.float32)
                 mod.g_proj += self.projection_block.T @ g_out_centered.to(dtype=torch.float32)
 
-                if self.seppo_testing and i == len(self.linear_modules)//2:
+                if self.testing and i == len(self.linear_modules)//2:
                     print(f"dumping tensors for {lname}")
                     self.dump_tensors(act_in_centered=act_in_centered, g_out_centered=g_out_centered, a_proj=mod.a_proj, g_proj=mod.g_proj)
 
