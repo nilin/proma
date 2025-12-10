@@ -168,7 +168,9 @@ class DataParallelPPOActor(BasePPOActor):
                         f"g_out_centered_{lname}": g_out_centered,
                         f"a_proj_{lname}": mod.a_proj,
                         f"g_proj_{lname}": mod.g_proj,
-                        f"projection_block_{lname}": self.projection_block})
+                        f"projection_block_{lname}": self.projection_block,
+                        f"mcb_advantages": self.mcb_advantages,
+                        })
 
             if self.testing and i in [8,16,32,64,128]:
                 import functools
