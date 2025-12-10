@@ -163,7 +163,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                 if dump:
                     print(f"dumping tensors for {lname}")
-                    self.dump_tensors({
+                    self.dump_tensors(**{
                         f"act_in_centered_{lname}": act_in_centered,
                         f"g_out_centered_{lname}": g_out_centered,
                         f"a_proj_{lname}": mod.a_proj,
