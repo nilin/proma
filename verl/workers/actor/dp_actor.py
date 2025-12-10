@@ -760,6 +760,7 @@ class DataParallelPPOActor(BasePPOActor):
                                     else:
                                         preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8))
                                     preconditioner = torch.clamp(preconditioner, 0, 1)
+                                    print(f"min preconditioner: {torch.min(preconditioner)}, #<1.0: {(preconditioner < 1.0).sum().item()}")
 
                                 diag = preconditioner - 1.0
 
