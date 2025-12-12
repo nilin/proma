@@ -795,7 +795,7 @@ class DataParallelPPOActor(BasePPOActor):
                                     scaling = 1.0 / preconditioner[self.seppo_dim-1]
                                     scaling = torch.clamp(scaling, min=self.seppo_min_preconditioner / preconditioner[0])
                                     scaling = self.get_ema(f"seppo_scaling_{lname}_{actual_mode}", scaling, self.seppo_ema_decay)
-
+                                    preconditioner = preconditioner * scaling
                                     preconditioner = torch.clamp(preconditioner, 0.0, 1.0)
                                     print(f"min preconditioner: {torch.min(preconditioner)}, #<1.0: {(preconditioner < 1.0).sum().item()}")
 
