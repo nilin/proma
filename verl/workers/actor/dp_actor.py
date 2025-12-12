@@ -158,6 +158,10 @@ class DataParallelPPOActor(BasePPOActor):
                 mod.a_norms2.append(act_in.float().norm(dim=0).pow(2))
                 mod.g_norms2.append(g_out.float().norm(dim=0).pow(2))
 
+                if act_in.shape[-1] > self.seppo_len_lim:
+                    print(f"not registering seppo for {lname} because act_in.shape[-1] > {self.seppo_len_lim}")
+                    return
+
                 # mod.a_proj += self.projection_block.T @ act_in.to(dtype=torch.float32)
                 # mod.g_proj += self.projection_block.T @ g_out.to(dtype=torch.float32)
 
@@ -822,11 +826,14 @@ class DataParallelPPOActor(BasePPOActor):
 
                             grad_transformed = g_local.clone()
 
-                            g_proj = torch.cat(lmod.g_proj, dim=0)
-                            a_proj = torch.cat(lmod.a_proj, dim=0)
-                            grad_transformed = precondition(grad_transformed, g_proj[:,sl[0]], scale=out_scale, mode="left")
-                            grad_transformed = precondition(grad_transformed, a_proj[:,sl[1]], scale=in_scale, mode="right")
-                            grad_transformed = grad_transformed * post_scale
+                            if len(lmod.a_proj) > 0:
+                                g_proj = torch.cat(lmod.g_proj, dim=0)
+                                a_proj = torch.cat(lmod.a_proj, dim=0)
+                                grad_transformed = precondition(grad_transformed, g_proj[:,sl[0]], scale=out_scale, mode="left")
+                                grad_transformed = precondition(grad_transformed, a_proj[:,sl[1]], scale=in_scale, mode="right")
+                                grad_transformed = grad_transformed * post_scale
+                            else:
+                                print(f"no a_proj for {lname}, skipping seppo")
 
                             with torch.no_grad():
                                 g_local.copy_(grad_transformed)
