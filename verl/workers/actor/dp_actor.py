@@ -203,7 +203,7 @@ class DataParallelPPOActor(BasePPOActor):
             return Q.T @ A
         else:
             _, S, V = torch.linalg.svd(Q.T @ A, full_matrices=False)
-            return S[:k], V[:k]
+            return S, V
 
     def reset_seppo_stats(self):
         for lname, lmod in self.linear_modules.items():
@@ -829,6 +829,8 @@ class DataParallelPPOActor(BasePPOActor):
                             if len(lmod.a_proj) > 0:
                                 g_proj = torch.cat(lmod.g_proj, dim=0)
                                 a_proj = torch.cat(lmod.a_proj, dim=0)
+                                lmod.a_proj.clear()
+                                lmod.g_proj.clear()
                                 grad_transformed = precondition(grad_transformed, g_proj[:,sl[0]], scale=out_scale, mode="left")
                                 grad_transformed = precondition(grad_transformed, a_proj[:,sl[1]], scale=in_scale, mode="right")
                                 grad_transformed = grad_transformed * post_scale
@@ -837,6 +839,8 @@ class DataParallelPPOActor(BasePPOActor):
 
                             with torch.no_grad():
                                 g_local.copy_(grad_transformed)
+
+                    self.reset_seppo_stats()
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
