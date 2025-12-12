@@ -97,53 +97,6 @@ switch-alg-2updates \
     actor_rollout_ref.actor.clip_ratio=1e9 \
     actor_rollout_ref.actor.clip_ratio_high=1e9 \
     actor_rollout_ref.actor.clip_ratio_low=1e9 \
-    actor_rollout_ref.actor.clip_ratio_c=1e9 
-
-#switch-alg-2updates \
-#	+actor_rollout_ref.actor.use_seppo=True \
-#	+actor_rollout_ref.actor.seppo_testing=False \
-#    +actor_rollout_ref.actor.seppo_scale_mode=mult \
-#	actor_rollout_ref.actor.optim.optimizer=SGD \
-#	actor_rollout_ref.actor.optim.optimizer_impl=torch.optim \
-#    actor_rollout_ref.actor.optim.lr=0.2 \
-#    trainer.val_before_train=True \
-#    actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
-#	actor_rollout_ref.actor.strategy=fsdp2 \
-#	critic.strategy=fsdp2 \
-#    trainer.experiment_name=TEST-FULL 
-
-#switch-alg-2updates \
-#    actor_rollout_ref.actor.optim.lr=2e-6 \
-#    trainer.val_before_train=True \
-#    actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
-#	actor_rollout_ref.actor.strategy=fsdp2 \
-#	critic.strategy=fsdp2 \
-#    trainer.experiment_name=GRPO
-
-    #actor_rollout_ref.actor.clip_ratio=1e9 \
-    #actor_rollout_ref.actor.clip_ratio_high=1e9 \
-    #actor_rollout_ref.actor.clip_ratio_low=1e9 \
-    #actor_rollout_ref.actor.clip_ratio_c=1e9 \
-
-#switch-alg-2updates \
-#    +actor_rollout_ref.actor.extra.seppo=True \
-#    actor_rollout_ref.actor.extra.algorithm="seppo" \
-#    +actor_rollout_ref.actor.optim.extra.optimizer=sgd \
-#    actor_rollout_ref.actor.optim.lr=2e-5 \
-#    trainer.val_before_train=False \
-#    +actor_rollout_ref.actor.fsdp_config.use_orig_params=true \
-#	actor_rollout_ref.actor.strategy=fsdp2 \
-#	critic.strategy=fsdp2 \
-#    trainer.experiment_name=TEST-FULL 
-
-    #+trainer.strategy=fsdp2 \
-    #actor_rollout_ref.actor.fsdp_config.fsdp_size=1 \
-
-#        switch-alg-2updates \
-#            +actor_rollout_ref.actor.extra.nspg_type=full \
-#            trainer.val_before_train=False \
-#            +actor_rollout_ref.actor.extra.nspg=True \
-#            actor_rollout_ref.actor.extra.algorithm="seppo" \
-#            +actor_rollout_ref.actor.extra.nspg_tokenwise_clip=True \
-#            trainer.experiment_name=TEST-FULL 
+    actor_rollout_ref.actor.clip_ratio_c=1e9 \
+    trainer.test_freq=2 \
 
