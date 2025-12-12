@@ -184,6 +184,7 @@ class DataParallelPPOActor(BasePPOActor):
                 lmod.register_full_backward_hook(_bwd_hook)
 
     def right_singular_rows(self, A: torch.Tensor, k: int, iterations: int = 3, skip_svd: bool = False) -> torch.Tensor:
+        A = A.to(dtype=torch.float32)
         n, d = A.shape
         k_ = k+self.projection_dim_margin
         N = torch.randn(d, k_, device=A.device, dtype=A.dtype)
