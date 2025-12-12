@@ -152,20 +152,23 @@ class DataParallelPPOActor(BasePPOActor):
                 g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
                 g_out = g_out / self.loss_scale_factor
 
-                act_in_centered = act_in - act_in.mean(dim=0, keepdim=True)
-                g_out_centered = g_out - g_out.mean(dim=0, keepdim=True)
+                # act_in = act_in - act_in.mean(dim=0, keepdim=True)
+                # g_out = g_out - g_out.mean(dim=0, keepdim=True)
 
-                mod.a_norms2.append(act_in_centered.float().norm(dim=0).pow(2))
-                mod.g_norms2.append(g_out_centered.float().norm(dim=0).pow(2))
+                mod.a_norms2.append(act_in.float().norm(dim=0).pow(2))
+                mod.g_norms2.append(g_out.float().norm(dim=0).pow(2))
 
-                mod.a_proj += self.projection_block.T @ act_in_centered.to(dtype=torch.float32)
-                mod.g_proj += self.projection_block.T @ g_out_centered.to(dtype=torch.float32)
+                # mod.a_proj += self.projection_block.T @ act_in.to(dtype=torch.float32)
+                # mod.g_proj += self.projection_block.T @ g_out.to(dtype=torch.float32)
+
+                mod.a_proj.append(self.right_singular_rows(act_in, self.seppo_dim, skip_svd=True))
+                mod.g_proj.append(self.right_singular_rows(g_out, self.seppo_dim, skip_svd=True))
 
                 if dump:
                     print(f"dumping tensors for {lname}")
                     self.dump_tensors(**{
-                        f"act_in_centered_{lname}": act_in_centered,
-                        f"g_out_centered_{lname}": g_out_centered,
+                        f"act_in_{lname}": act_in,
+                        f"g_out_{lname}": g_out,
                         f"a_proj_{lname}": mod.a_proj,
                         f"g_proj_{lname}": mod.g_proj,
                         f"projection_block_{lname}": self.projection_block,
@@ -180,12 +183,35 @@ class DataParallelPPOActor(BasePPOActor):
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(_bwd_hook)
 
+    def right_singular_rows(self, A: torch.Tensor, k: int, iterations: int = 3, skip_svd: bool = False) -> torch.Tensor:
+        n, d = A.shape
+        k_ = k+self.projection_dim_margin
+        N = torch.randn(d, k_, device=A.device, dtype=A.dtype)
+        Y = A @ N
+        for _ in range(iterations-1):
+            N = A.T @ Y
+            Y = A @ N
+            
+        Q, R = torch.linalg.qr(Y)
+
+        if skip_svd:
+            return Q.T @ A
+        else:
+            _, S, V = torch.linalg.svd(Q.T @ A, full_matrices=False)
+            return S[:k], V[:k]
+
     def reset_seppo_stats(self):
         for lname, lmod in self.linear_modules.items():
-            lmod.a_norms2 = []
-            lmod.g_norms2 = []
-            lmod.a_proj = 0.0
-            lmod.g_proj = 0.0
+            try:
+                lmod.a_norms2.clear()
+                lmod.g_norms2.clear()
+                lmod.a_proj.clear()
+                lmod.g_proj.clear()
+            except Exception:
+                lmod.a_norms2 = []
+                lmod.g_norms2 = []
+                lmod.a_proj = []
+                lmod.g_proj = []
 
     def flatten_response_window(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Flatten non-padding response tokens to (N, ...).
@@ -737,39 +763,45 @@ class DataParallelPPOActor(BasePPOActor):
                             g_norm2_sum = torch.sum(torch.stack(lmod.g_norms2), dim=0)[sl[0]]
                             a_norm2_sum = torch.sum(torch.stack(lmod.a_norms2), dim=0)[sl[1]]
 
-                            def precondition(grad, scale, proj, mode="right", actual_mode=None):
+                            def precondition(grad, proj, scale=None, mode="right", actual_mode=None):
 
                                 if len(scale) > self.seppo_len_lim:
                                     print(f"skipping {actual_mode} seppo for {lname} with dim {grad.shape} because len(scale) > {self.seppo_len_lim}")
                                     return grad
 
                                 if mode == "left":
-                                    return precondition(grad.T, scale, proj, mode="right", actual_mode="left").T
+                                    return precondition(grad.T, proj, scale=scale, mode="right", actual_mode="left").T
 
                                 if actual_mode is None:
                                     actual_mode = mode
 
-                                grad = scale * grad
-                                proj = scale * proj
+                                proj = torch.cat(proj, dim=0)
+                                S, V = self.right_singular_rows(proj, self.seppo_dim)
 
-                                U, S, V = torch.linalg.svd(proj, full_matrices=False)
+                                if scale is not None:
+                                    grad = scale * grad
+                                    proj = scale * proj
 
                                 if self.seppo_linear_interpolation:
                                     preconditioner = torch.ones_like(S)
                                     preconditioner[:self.seppo_dim] = torch.linspace(self.seppo_min_preconditioner, 1.0, self.seppo_dim) 
 
                                 else:
-                                    # minscale = self.get_ema(f"seppo_minscale_{lname}_{actual_mode}", S[self.seppo_dim-1], self.seppo_ema_decay)
-                                    # preconditioner = minscale / (torch.clamp(S, min=minscale) + 1e-8)
-                                    # print(f"preconditioner min before clamp by {self.seppo_min_preconditioner}: {torch.min(preconditioner)}")
-                                    # preconditioner = torch.clamp(preconditioner, min=self.seppo_min_preconditioner)
+                                    minscale = self.get_ema(f"seppo_minscale_{lname}_{actual_mode}", S[self.seppo_dim-1], self.seppo_ema_decay)
+                                    preconditioner = minscale / (torch.clamp(S, min=minscale) + 1e-8)
+                                    print(f"preconditioner min before clamp by {self.seppo_min_preconditioner}: {torch.min(preconditioner)}")
+                                    preconditioner = torch.clamp(preconditioner, min=self.seppo_min_preconditioner)
 
-                                    _scale = self.get_ema(f"seppo_scale_{lname}_{actual_mode}", S[0], self.seppo_ema_decay)
                                     if self.seppo_squared:
-                                        preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8)).pow(2)
-                                    else:
-                                        preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8))
-                                    preconditioner = torch.clamp(preconditioner, 0, 1)
+                                        preconditioner = preconditioner.pow(2)
+
+                                    #_scale = self.get_ema(f"seppo_scale_{lname}_{actual_mode}", S[0], self.seppo_ema_decay)
+                                    #if self.seppo_squared:
+                                    #    preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8)).pow(2)
+                                    #else:
+                                    #    preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8))
+                                    #preconditioner = torch.clamp(preconditioner, 0, 1)
+
                                     print(f"min preconditioner: {torch.min(preconditioner)}, #<1.0: {(preconditioner < 1.0).sum().item()}")
 
                                 diag = preconditioner - 1.0
@@ -794,8 +826,8 @@ class DataParallelPPOActor(BasePPOActor):
                                     raise ValueError(f"Invalid seppo_scale_mode: {self.seppo_scale_mode}")
 
                             grad_transformed = g_local.clone()
-                            grad_transformed = precondition(grad_transformed, out_scale, lmod.g_proj[:,sl[0]], mode="left")
-                            grad_transformed = precondition(grad_transformed, in_scale, lmod.a_proj[:,sl[1]], mode="right")
+                            grad_transformed = precondition(grad_transformed, lmod.g_proj[:,sl[0]], scale=out_scale, mode="left")
+                            grad_transformed = precondition(grad_transformed, lmod.a_proj[:,sl[1]], scale=in_scale, mode="right")
                             grad_transformed = grad_transformed * post_scale
 
                             with torch.no_grad():
