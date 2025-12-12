@@ -787,21 +787,16 @@ class DataParallelPPOActor(BasePPOActor):
                                     preconditioner[:self.seppo_dim] = torch.linspace(self.seppo_min_preconditioner, 1.0, self.seppo_dim) 
 
                                 else:
-                                    minscale = self.get_ema(f"seppo_minscale_{lname}_{actual_mode}", S[self.seppo_dim-1], self.seppo_ema_decay)
-                                    preconditioner = minscale / (torch.clamp(S, min=minscale) + 1e-8)
-                                    print(f"preconditioner min before clamp by {self.seppo_min_preconditioner}: {torch.min(preconditioner)}")
-                                    preconditioner = torch.clamp(preconditioner, min=self.seppo_min_preconditioner)
-
                                     if self.seppo_squared:
-                                        preconditioner = preconditioner.pow(2)
+                                        preconditioner = 1.0 / (S.pow(2) + 1e-8)
+                                    else:
+                                        preconditioner = 1.0 / (S + 1e-8)
 
-                                    #_scale = self.get_ema(f"seppo_scale_{lname}_{actual_mode}", S[0], self.seppo_ema_decay)
-                                    #if self.seppo_squared:
-                                    #    preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8)).pow(2)
-                                    #else:
-                                    #    preconditioner = self.seppo_min_preconditioner * (_scale / (S + 1e-8))
-                                    #preconditioner = torch.clamp(preconditioner, 0, 1)
+                                    scaling = 1.0 / preconditioner[self.seppo_dim-1]
+                                    scaling = torch.clamp(scaling, min=self.seppo_min_preconditioner / preconditioner[0])
+                                    scaling = self.get_ema(f"seppo_scaling_{lname}_{actual_mode}", scaling, self.seppo_ema_decay)
 
+                                    preconditioner = torch.clamp(preconditioner, 0.0, 1.0)
                                     print(f"min preconditioner: {torch.min(preconditioner)}, #<1.0: {(preconditioner < 1.0).sum().item()}")
 
                                 diag = preconditioner - 1.0
