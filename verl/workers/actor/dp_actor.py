@@ -776,7 +776,6 @@ class DataParallelPPOActor(BasePPOActor):
                                 if actual_mode is None:
                                     actual_mode = mode
 
-                                proj = torch.cat(proj, dim=0)
                                 S, V = self.right_singular_rows(proj, self.seppo_dim)
 
                                 if scale is not None:
@@ -822,8 +821,11 @@ class DataParallelPPOActor(BasePPOActor):
                                     raise ValueError(f"Invalid seppo_scale_mode: {self.seppo_scale_mode}")
 
                             grad_transformed = g_local.clone()
-                            grad_transformed = precondition(grad_transformed, lmod.g_proj[:,sl[0]], scale=out_scale, mode="left")
-                            grad_transformed = precondition(grad_transformed, lmod.a_proj[:,sl[1]], scale=in_scale, mode="right")
+
+                            g_proj = torch.cat(lmod.g_proj, dim=0)
+                            a_proj = torch.cat(lmod.a_proj, dim=0)
+                            grad_transformed = precondition(grad_transformed, g_proj[:,sl[0]], scale=out_scale, mode="left")
+                            grad_transformed = precondition(grad_transformed, a_proj[:,sl[1]], scale=in_scale, mode="right")
                             grad_transformed = grad_transformed * post_scale
 
                             with torch.no_grad():
