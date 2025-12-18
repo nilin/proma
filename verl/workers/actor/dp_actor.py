@@ -96,7 +96,6 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_dim = self.config.get("seppo_dim", 32)
         self.projection_dim_margin = 8
         self.random_projection_dim = self.seppo_dim + self.projection_dim_margin
-        self.seppo_scale_mode = self.config.get("seppo_scale_mode", "temporary")
         self.seppo_ema_decay = self.config.get("seppo_ema_decay", 0.8)
         self.seppo_min_preconditioner = self.config.get("seppo_min_preconditioner", 0.2)
         self.seppo_linear_interpolation = self.config.get("seppo_linear_interpolation", False)
@@ -152,18 +151,9 @@ class DataParallelPPOActor(BasePPOActor):
                 g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
                 g_out = g_out / self.loss_scale_factor
 
-                # act_in = act_in - act_in.mean(dim=0, keepdim=True)
-                # g_out = g_out - g_out.mean(dim=0, keepdim=True)
-
-                mod.a_norms2.append(act_in.float().norm(dim=0).pow(2))
-                mod.g_norms2.append(g_out.float().norm(dim=0).pow(2))
-
                 if act_in.shape[-1] > self.seppo_len_lim:
                     print(f"not registering seppo for {lname} because act_in.shape[-1] > {self.seppo_len_lim}")
                     return
-
-                # mod.a_proj += self.projection_block.T @ act_in.to(dtype=torch.float32)
-                # mod.g_proj += self.projection_block.T @ g_out.to(dtype=torch.float32)
 
                 mod.a_proj.append(self.right_singular_rows(act_in, self.seppo_dim, skip_svd=True))
                 mod.g_proj.append(self.right_singular_rows(g_out, self.seppo_dim, skip_svd=True))
@@ -208,13 +198,9 @@ class DataParallelPPOActor(BasePPOActor):
     def reset_seppo_stats(self):
         for lname, lmod in self.linear_modules.items():
             try:
-                lmod.a_norms2.clear()
-                lmod.g_norms2.clear()
                 lmod.a_proj.clear()
                 lmod.g_proj.clear()
             except Exception:
-                lmod.a_norms2 = []
-                lmod.g_norms2 = []
                 lmod.a_proj = []
                 lmod.g_proj = []
 
@@ -765,26 +751,19 @@ class DataParallelPPOActor(BasePPOActor):
                             g_local = dtg.to_local()
                             # Select matching per-row/col scalars and align dtype/device
 
-                            g_norm2_sum = torch.sum(torch.stack(lmod.g_norms2), dim=0)[sl[0]]
-                            a_norm2_sum = torch.sum(torch.stack(lmod.a_norms2), dim=0)[sl[1]]
+                            def precondition(grad, proj, mode="right", actual_mode=None):
 
-                            def precondition(grad, proj, scale=None, mode="right", actual_mode=None):
-
-                                if len(scale) > self.seppo_len_lim:
-                                    print(f"skipping {actual_mode} seppo for {lname} with dim {grad.shape} because len(scale) > {self.seppo_len_lim}")
+                                if grad.shape[-1] > self.seppo_len_lim:
+                                    print(f"skipping {actual_mode} seppo for {lname} with dim {grad.shape} because grad.shape[-1] > {self.seppo_len_lim}")
                                     return grad
 
                                 if mode == "left":
-                                    return precondition(grad.T, proj, scale=scale, mode="right", actual_mode="left").T
+                                    return precondition(grad.T, proj, mode="right", actual_mode="left").T
 
                                 if actual_mode is None:
                                     actual_mode = mode
 
                                 S, V = self.right_singular_rows(proj, self.seppo_dim)
-
-                                if scale is not None:
-                                    grad = scale * grad
-                                    proj = scale * proj
 
                                 if self.seppo_linear_interpolation:
                                     preconditioner = torch.ones_like(S)
@@ -807,23 +786,6 @@ class DataParallelPPOActor(BasePPOActor):
 
                                 return grad + ((grad @ V.T) * diag) @ V
 
-                            match self.seppo_scale_mode:
-                                case "mult":
-                                    out_scale = 1.0 / (g_norm2_sum.sqrt() + 1e-6)
-                                    in_scale = 1.0 / (a_norm2_sum.sqrt() + 1e-6)
-                                    raise NotImplementedError("removed self.n_params")
-                                    # post_scale = 1.0 / math.sqrt(float(self.n_params))
-                                case "temporary":
-                                    out_scale = 1.0 / (g_norm2_sum.sqrt() + 1e-6)
-                                    in_scale = 1.0 / (a_norm2_sum.sqrt() + 1e-6)
-                                    post_scale = g_norm2_sum.sqrt()[:, None] * a_norm2_sum.sqrt()[None, :]
-                                case "none":
-                                    out_scale = torch.ones_like(g_norm2_sum)
-                                    in_scale = torch.ones_like(a_norm2_sum)
-                                    post_scale = 1.0
-                                case _:
-                                    raise ValueError(f"Invalid seppo_scale_mode: {self.seppo_scale_mode}")
-
                             grad_transformed = g_local.clone()
 
                             if len(lmod.a_proj) > 0:
@@ -831,9 +793,8 @@ class DataParallelPPOActor(BasePPOActor):
                                 a_proj = torch.cat(lmod.a_proj, dim=0)
                                 lmod.a_proj.clear()
                                 lmod.g_proj.clear()
-                                grad_transformed = precondition(grad_transformed, g_proj[:,sl[0]], scale=out_scale, mode="left")
-                                grad_transformed = precondition(grad_transformed, a_proj[:,sl[1]], scale=in_scale, mode="right")
-                                grad_transformed = grad_transformed * post_scale
+                                grad_transformed = precondition(grad_transformed, g_proj[:,sl[0]], mode="left")
+                                grad_transformed = precondition(grad_transformed, a_proj[:,sl[1]], mode="right")
                             else:
                                 print(f"no a_proj for {lname}, skipping seppo")
 
