@@ -784,7 +784,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                                     n_precondition = (preconditioner < 1.0).sum().item()
                                     print(f"{lname}.{pname} preconditioner #<1.0: {n_precondition}")
-                                    print(f"first10: {[float(f'{x.item():.2g}') for x in preconditioner.flatten()[:10]]}\n")
+                                    print(f"first10: {[float(f'{x.item():.2g}') for x in preconditioner.flatten()[:10]]}")
 
                                 diag = preconditioner - 1.0
 
@@ -793,9 +793,10 @@ class DataParallelPPOActor(BasePPOActor):
                                 r = torch.norm(grad_adjustment) / torch.norm(grad)
                                 if r > self.seppo_adjustment_threshold:
                                     adjustment_ratio = self.seppo_adjustment_threshold / r
-                                    print(f"adjustment ratio {adjustment_ratio:.2f} < {r:.2f}")
+                                    print(f"adjustment ratio {adjustment_ratio:.2f}")
                                     grad_adjustment = grad_adjustment * adjustment_ratio
 
+                                print()
                                 return grad + grad_adjustment
 
 
