@@ -101,6 +101,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_linear_interpolation = self.config.get("seppo_linear_interpolation", False)
         self.seppo_squared = self.config.get("seppo_squared", False)
         self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
+        self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -780,9 +781,15 @@ class DataParallelPPOActor(BasePPOActor):
                                     scaling = self.get_ema(f"seppo_scaling_{lname}_{actual_mode}", scaling, self.seppo_ema_decay)
                                     preconditioner = preconditioner * scaling
                                     preconditioner = torch.clamp(preconditioner, 0.0, 1.0)
-                                    print(f"min preconditioner: {torch.min(preconditioner)}, #<1.0: {(preconditioner < 1.0).sum().item()}")
+
+                                    n_precondition = (preconditioner < 1.0).sum().item()
+                                    print(f"{lname}.{pname} preconditioner #<1.0: {n_precondition}")
+                                    print(f"first10: {[float(f'{x.item():.2g}') for x in preconditioner.flatten()[:10]]}\n")
 
                                 diag = preconditioner - 1.0
+
+                                if n_precondition == 1 and self.seppo_skip_rank_1:
+                                    return grad
 
                                 return grad + ((grad @ V.T) * diag) @ V
 
