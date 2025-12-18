@@ -76,27 +76,24 @@ switch-alg-2updates () {
 switch-alg-2updates \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_testing=False \
-    +actor_rollout_ref.actor.seppo_scale_mode=none \
     +actor_rollout_ref.actor.seppo_dim=20 \
     +actor_rollout_ref.actor.seppo_ema_decay=0.8 \
     +actor_rollout_ref.actor.seppo_min_preconditioner=0.5 \
-    +actor_rollout_ref.actor.seppo_linear_interpolation=True \
+    +actor_rollout_ref.actor.seppo_linear_interpolation=False \
     +actor_rollout_ref.actor.seppo_squared=False \
     trainer.experiment_name=seppo
 
 switch-alg-2updates \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_testing=False \
-    +actor_rollout_ref.actor.seppo_scale_mode=none \
-    +actor_rollout_ref.actor.seppo_dim=32 \
+    +actor_rollout_ref.actor.seppo_dim=20 \
     +actor_rollout_ref.actor.seppo_ema_decay=0.8 \
-    +actor_rollout_ref.actor.seppo_min_preconditioner=0.3 \
-    +actor_rollout_ref.actor.seppo_linear_interpolation=True \
+    +actor_rollout_ref.actor.seppo_min_preconditioner=0.5 \
+    +actor_rollout_ref.actor.seppo_linear_interpolation=False \
     +actor_rollout_ref.actor.seppo_squared=False \
     trainer.experiment_name=seppo-noclip \
     actor_rollout_ref.actor.clip_ratio=1e9 \
     actor_rollout_ref.actor.clip_ratio_high=1e9 \
     actor_rollout_ref.actor.clip_ratio_low=1e9 \
-    actor_rollout_ref.actor.clip_ratio_c=1e9 \
-    trainer.test_freq=2 \
+    actor_rollout_ref.actor.clip_ratio_c=1e9 
 
