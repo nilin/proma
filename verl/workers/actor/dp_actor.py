@@ -102,7 +102,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_squared = self.config.get("seppo_squared", False)
         self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
         self.seppo_adjustment_threshold = self.config.get("seppo_adjustment_threshold", 0.2)
-
+        self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
+        
         if self.seppo:
             self.install_seppo_hooks()
             self.reset_seppo_stats()
@@ -795,6 +796,10 @@ class DataParallelPPOActor(BasePPOActor):
                                     adjustment_ratio = self.seppo_adjustment_threshold / r
                                     print(f"adjustment ratio {adjustment_ratio:.2f}")
                                     grad_adjustment = grad_adjustment * adjustment_ratio
+
+                                if self.seppo_skip_rank_1 and n_precondition == 1:
+                                    print(f"skipping seppo because n_precondition == 1")
+                                    return grad
 
                                 print()
                                 return grad + grad_adjustment
