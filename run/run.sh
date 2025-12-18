@@ -61,7 +61,7 @@ switch-alg-2updates () {
 	trainer.total_epochs=20 \
     trainer.resume_mode=disable \
     trainer.project_name='seppo2' \
-    trainer.total_training_steps=102 \
+    trainer.total_training_steps=52 \
     trainer.n_gpus_per_node=1 \
     actor_rollout_ref.actor.optim.lr=2e-6 \
     trainer.val_before_train=True \
