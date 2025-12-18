@@ -101,7 +101,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_linear_interpolation = self.config.get("seppo_linear_interpolation", False)
         self.seppo_squared = self.config.get("seppo_squared", False)
         self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
-        self.seppo_skip_rank_1_threshold = self.config.get("seppo_skip_rank_1_threshold", 0.0)
+        self.seppo_adjustment_threshold = self.config.get("seppo_adjustment_threshold", 0.2)
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -788,13 +788,15 @@ class DataParallelPPOActor(BasePPOActor):
 
                                 diag = preconditioner - 1.0
 
-                                grad_transformed = grad + ((grad @ V.T) * diag) @ V
+                                grad_adjustment = ((grad @ V.T) * diag) @ V
 
-                                if self.seppo_skip_rank_1 and torch.norm(grad_transformed) < torch.norm(grad)*self.seppo_skip_rank_1_threshold:
-                                    print(f"{lname}.{pname} skipping seppo because {torch.norm(grad_transformed)/torch.norm(grad):.2f} < {self.seppo_skip_rank_1_threshold:.2f}")
-                                    return grad
-                                else:
-                                    return grad_transformed
+                                r = torch.norm(grad_adjustment) / torch.norm(grad)
+                                if r > self.seppo_adjustment_threshold:
+                                    adjustment_ratio = self.seppo_adjustment_threshold / r
+                                    print(f"adjustment ratio {adjustment_ratio:.2f} < {r:.2f}")
+                                    grad_adjustment = grad_adjustment * adjustment_ratio
+
+                                return grad + grad_adjustment
 
 
                             grad_transformed = g_local.clone()
