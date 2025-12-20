@@ -151,50 +151,40 @@ class DataParallelPPOActor(BasePPOActor):
                 if g_out.dim() >= 3 and g_out.size(0) == 1:
                     g_out = g_out[0]
 
-                non0 = self.mcb_advantages != 0
-                act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None]
-                g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
-                g_out = g_out / self.loss_scale_factor
+                if self.seppo_mode == "sequence":
+                    self.mcb_norms2 += (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
 
-                if act_in.shape[-1] > self.seppo_len_lim:
-                    print(f"not registering seppo for {lname} because act_in.shape[-1] > {self.seppo_len_lim}")
-                    return
+                if self.seppo_mode == "parameter":
+                    non0 = self.mcb_advantages != 0
+                    act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None]
+                    g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None]
+                    g_out = g_out / self.loss_scale_factor
 
-                mod.a_proj.append(self.right_singular_rows(act_in, self.seppo_dim, skip_svd=True))
-                mod.g_proj.append(self.right_singular_rows(g_out, self.seppo_dim, skip_svd=True))
+                    if act_in.shape[-1] > self.seppo_len_lim:
+                        print(f"not registering seppo for {lname} because act_in.shape[-1] > {self.seppo_len_lim}")
+                        return
 
-                if dump:
-                    print(f"dumping tensors for {lname}")
-                    self.dump_tensors(**{
-                        f"act_in_{lname}": act_in,
-                        f"g_out_{lname}": g_out,
-                        f"a_proj_{lname}": mod.a_proj,
-                        f"g_proj_{lname}": mod.g_proj,
-                        f"projection_block_{lname}": self.projection_block,
-                        f"mcb_advantages": self.mcb_advantages,
-                        })
+                    mod.a_proj.append(self.right_singular_rows(act_in, self.seppo_dim, skip_svd=True))
+                    mod.g_proj.append(self.right_singular_rows(g_out, self.seppo_dim, skip_svd=True))
 
-            def _bwd_hook_sequence(mod, grad_input, grad_output, dump=False, lname=None):
-                act_in = mod._seppo_act_in.clone()
-                _g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
-                g_out = _g_out.clone()
-
-                if act_in.dim() >= 3 and act_in.size(0) == 1:
-                    act_in = act_in[0]
-                if g_out.dim() >= 3 and g_out.size(0) == 1:
-                    g_out = g_out[0]
-
-                self.mcb_norms2 += (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
+                    if dump:
+                        print(f"dumping tensors for {lname}")
+                        self.dump_tensors(**{
+                            f"act_in_{lname}": act_in,
+                            f"g_out_{lname}": g_out,
+                            f"a_proj_{lname}": mod.a_proj,
+                            f"g_proj_{lname}": mod.g_proj,
+                            f"projection_block_{lname}": self.projection_block,
+                            f"mcb_advantages": self.mcb_advantages,
+                            })
 
             if self.testing and i in [8,16,32,64,128]:
                 import functools
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(functools.partial(_bwd_hook, dump=True, lname=lname))
-                lmod.register_full_backward_hook(functools.partial(_bwd_hook_sequence, dump=True, lname=lname))
             else:
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(_bwd_hook)
-                lmod.register_full_backward_hook(_bwd_hook_sequence)
 
     def right_singular_rows(self, A: torch.Tensor, k: int, iterations: int = 3, skip_svd: bool = False) -> torch.Tensor:
         A = A.to(dtype=torch.float32)
