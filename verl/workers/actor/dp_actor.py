@@ -721,8 +721,8 @@ class DataParallelPPOActor(BasePPOActor):
                     ## SEPPO PARAMETER MODE
                     if self.seppo and self.seppo_mode == "parameter":
                         attention_mask = model_inputs["attention_mask"]
-                        assert (advantages == advantages[..., -1:].expand_as(advantages)).all(), "advantages is not constant across the last dimension"
-                        advantages_w_prompt = advantages[..., -1:].expand_as(attention_mask)
+                        advantages_w_prompt = advantages[..., :1].expand_as(attention_mask) * attention_mask
+                        assert advantages_w_prompt[:, -advantages.shape[1]:] == advantages, advantages_w_prompt
                         # advantages_w_prompt = torch.zeros_like(attention_mask)
                         # advantages_w_prompt[:, -advantages.shape[1]:] = advantages
                         self.mcb_advantages = self.flatten_response_window(advantages_w_prompt, attention_mask)
