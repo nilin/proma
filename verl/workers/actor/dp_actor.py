@@ -151,8 +151,8 @@ class DataParallelPPOActor(BasePPOActor):
                 if g_out.dim() >= 3 and g_out.size(0) == 1:
                     g_out = g_out[0]
 
-                if self.seppo_mode == "sequence":
-                    self.mcb_norms2 += (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
+                if self.seppo_mode == "sequence" and self.log_grads:
+                    self.norms2_cache += (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
 
                 if self.seppo_mode == "parameter":
                     non0 = self.mcb_advantages != 0
@@ -325,6 +325,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         self.norms2 = []
         self.seq_norms = []
+        self.log_grads = True
 
         for mcb_idx, micro_batch in enumerate(micro_batches):
             self.norms2_cache = 0.0
@@ -343,6 +344,7 @@ class DataParallelPPOActor(BasePPOActor):
             self.seq_norms.append(torch.tensor([torch.sqrt(torch.mean(seq)) for seq in seq_norms2]))
 
         self.actor_optimizer.zero_grad()
+        self.log_grads = False
 
     #########################################################
 
