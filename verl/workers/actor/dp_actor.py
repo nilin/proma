@@ -330,18 +330,39 @@ class DataParallelPPOActor(BasePPOActor):
         for mcb_idx, micro_batch in enumerate(micro_batches):
             self.norms2_cache = 0.0
 
-            self.projection_block = self.projections[mcb_idx]
             micro_batch = micro_batch.to(get_device_id())
             model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
 
             entropy, log_prob = self._forward_micro_batch(
                 model_inputs, temperature=temperature, calculate_entropy=False
             )
+            #version 1 hardcoded equal weight tokens
+            #log_prob.sum().backward()
 
-            log_prob.sum().backward()
+            #version 2 token weight adapts to aggregation method (cancels out agg method)
+            response_mask = model_inputs["response_mask"]
+            old_log_prob = model_inputs["old_log_probs"]
+            advantages = model_inputs["advantages"]
+            loss_agg_mode = self.config.loss_agg_mode
+            loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
+            rollout_is_weights = model_inputs.get("rollout_is_weights", None)
+            policy_loss_fn = get_policy_loss_fn(loss_mode)
+
+            ONES = torch.ones_like(advantages)
+            pg_loss, pg_metrics = policy_loss_fn(
+                old_log_prob=old_log_prob,
+                log_prob=log_prob,
+                advantages=ONES,
+                response_mask=response_mask,
+                loss_agg_mode=loss_agg_mode,
+                config=self.config,
+                rollout_is_weights=rollout_is_weights,
+            )
+            pg_loss.backward()
+
             seq_norms2 = self.unflatten_attention_mask(self.norms2_cache, model_inputs["attention_mask"])
             self.norms2.append(seq_norms2)
-            self.seq_norms.append(torch.tensor([torch.sqrt(torch.mean(seq)) for seq in seq_norms2]))
+            self.seq_norms.append(torch.tensor([torch.sqrt(torch.sum(seq)) for seq in seq_norms2]))
 
         self.actor_optimizer.zero_grad()
         self.log_grads = False
