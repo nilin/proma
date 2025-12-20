@@ -156,8 +156,8 @@ class DataParallelPPOActor(BasePPOActor):
 
                 if self.seppo_mode == "parameter":
                     non0 = self.mcb_advantages != 0
-                    act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None].to(act_in.dtype)
-                    g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None].to(g_out.dtype)
+                    act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None].to(device=act_in.device, dtype=act_in.dtype)
+                    g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None].to(device=g_out.device, dtype=g_out.dtype)
                     g_out = g_out / self.loss_scale_factor
 
                     if act_in.shape[-1] > self.seppo_len_lim:
