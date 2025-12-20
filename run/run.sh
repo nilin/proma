@@ -75,6 +75,7 @@ switch-alg-2updates () {
 
 switch-alg-2updates \
     +actor_rollout_ref.actor.use_seppo=True \
+    +actor_rollout_ref.actor.seppo_mode=parameter \
     +actor_rollout_ref.actor.seppo_testing=False \
     +actor_rollout_ref.actor.seppo_dim=20 \
     +actor_rollout_ref.actor.seppo_ema_decay=0.8 \
@@ -87,6 +88,7 @@ switch-alg-2updates \
 
 switch-alg-2updates \
     +actor_rollout_ref.actor.use_seppo=True \
+    +actor_rollout_ref.actor.seppo_mode=parameter \
     +actor_rollout_ref.actor.seppo_testing=False \
     +actor_rollout_ref.actor.seppo_dim=20 \
     +actor_rollout_ref.actor.seppo_ema_decay=0.8 \
