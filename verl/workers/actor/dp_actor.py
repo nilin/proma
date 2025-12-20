@@ -315,7 +315,7 @@ class DataParallelPPOActor(BasePPOActor):
         mcb_seq_idx = torch.arange(attention_mask.shape[0], device=attention_mask.device).unsqueeze(1).expand_as(attention_mask)
         flat_mcb_seq_idx = self.flatten_response_window(mcb_seq_idx, attention_mask)
         res = []
-        for i in len(mcb_seq_idx):
+        for i in range(len(mcb_seq_idx)):
             indices = (flat_mcb_seq_idx == i)
             res.append(x[indices])
         return res
