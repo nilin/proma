@@ -105,9 +105,9 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_adjustment_threshold = self.config.get("seppo_adjustment_threshold", 0.2)
         self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
 
-        assert self.seppo_mode in ["parameter", "sequence"], "seppo_mode must be either parameter or sequence"
-
         if self.seppo:
+            assert self.seppo_mode in ["parameter", "sequence"], "seppo_mode must be either parameter or sequence"
+
             self.install_seppo_hooks()
             self.reset_seppo_stats()
 
