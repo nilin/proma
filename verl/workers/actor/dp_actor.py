@@ -91,6 +91,7 @@ class DataParallelPPOActor(BasePPOActor):
         #########################################################
 
         self.seppo = self.config.get("use_seppo", False)
+        self.seppo_mode = self.config.get("seppo_mode", None)
         self.testing = self.config.get("seppo_testing", False)
         self.seppo_static_fraction = self.config.get("seppo_static_fraction", 0.5)
         self.seppo_dim = self.config.get("seppo_dim", 32)
@@ -103,6 +104,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
         self.seppo_adjustment_threshold = self.config.get("seppo_adjustment_threshold", 0.2)
         self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
+
+        assert self.seppo_mode in ["parameter", "sequence"], "seppo_mode must be either parameter or sequence"
 
         if self.seppo:
             self.install_seppo_hooks()
@@ -313,6 +316,43 @@ class DataParallelPPOActor(BasePPOActor):
         os.makedirs("dump", exist_ok=True)
         for key, value in tensors.items():
             pd.DataFrame(value.detach().cpu().float().numpy()).to_parquet(f"dump/{key}.parquet")
+
+    #########################################################
+    # seqwise seppo
+    #########################################################
+
+    def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        mcb_seq_idx = torch.arange(attention_mask.shape[0], device=attention_mask.device).unsqueeze(1).expand_as(attention_mask)
+        flat_mcb_seq_idx = self.flatten_response_window(mcb_seq_idx, attention_mask)
+        res = []
+        for i in len(mcb_seq_idx):
+            indices = (flat_mcb_seq_idx == i)
+            res.append(x[indices])
+        return res
+    
+    # same as in the training loop, but without parameter updates and without advantages
+    def precompute_mcb_norms2(self, micro_batches, temperature, on_policy=False):
+
+        self.norms2 = []
+        self.seq_norms = []
+
+        for mcb_idx, micro_batch in enumerate(micro_batches):
+            self.norms2_cache = 0.0
+
+            self.projection_block = self.projections[mcb_idx]
+            micro_batch = micro_batch.to(get_device_id())
+            model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+
+            entropy, log_prob = self._forward_micro_batch(
+                model_inputs, temperature=temperature, calculate_entropy=False
+            )
+
+            log_prob.sum().backward()
+            seq_norms2 = self.unflatten_attention_mask(self.norms2_cache, model_inputs["attention_mask"])
+            self.norms2.append(seq_norms2)
+            self.seq_norms.append(torch.tensor([torch.sqrt(torch.mean(seq)) for seq in seq_norms2]))
+
+        self.actor_optimizer.zero_grad()
 
     #########################################################
 
@@ -641,8 +681,14 @@ class DataParallelPPOActor(BasePPOActor):
 
                 self.actor_optimizer.zero_grad()
 
-                for mb_idx, micro_batch in enumerate(micro_batches):
-                    self.projection_block = self.projections[mb_idx]
+                ################################################################################
+                ## SEPPO SEQUENCE MODE
+                if self.seppo and self.seppo_mode == "sequence":
+                    self.precompute_mcb_norms2(micro_batches, temperature, on_policy)
+                ################################################################################
+
+                for mcb_idx, micro_batch in enumerate(micro_batches):
+                    self.projection_block = self.projections[mcb_idx]
                     micro_batch = micro_batch.to(get_device_id())
                     micro_batch_metrics = {}
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
@@ -659,8 +705,8 @@ class DataParallelPPOActor(BasePPOActor):
                         loss_scale_factor = 1 / self.gradient_accumulation
 
                     ################################################################################
-
-                    if self.seppo:
+                    ## SEPPO PARAMETER MODE
+                    if self.seppo and self.seppo_mode == "parameter":
                         attention_mask = model_inputs["attention_mask"]
                         assert (advantages == advantages[..., -1:].expand_as(advantages)).all(), "advantages is not constant across the last dimension"
                         advantages_w_prompt = advantages[..., -1:].expand_as(attention_mask)
@@ -668,7 +714,12 @@ class DataParallelPPOActor(BasePPOActor):
                         # advantages_w_prompt[:, -advantages.shape[1]:] = advantages
                         self.mcb_advantages = self.flatten_response_window(advantages_w_prompt, attention_mask)
                         self.loss_scale_factor = loss_scale_factor
-
+                    ################################################################################
+                    ## SEPPO SEQUENCE MODE
+                    if self.seppo and self.seppo_mode == "sequence":
+                        seq_norms = self.seq_norms[mcb_idx]
+                        advantages = advantages / seq_norms.unsqueeze(1)
+                        print(f"seq_norms: {seq_norms}")
                     ################################################################################
 
                     # all return: (bsz, response_length)
@@ -750,8 +801,8 @@ class DataParallelPPOActor(BasePPOActor):
                         break
 
                 ################################################################################
-
-                if self.seppo:
+                ## SEPPO PARAMETER MODE
+                if self.seppo and self.seppo_mode == "parameter":
                     for lname, lmod in self.linear_modules.items():
                         for pname, p in lmod.named_parameters(recurse=False):
                             dtg = p.grad
@@ -838,6 +889,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 g_local.copy_(grad_transformed)
 
                     self.reset_seppo_stats()
+                ################################################################################
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}

@@ -112,6 +112,7 @@ class ActorConfig(BaseConfig):
     kl_loss_type: str = "low_var_kl"
     # Enable SEPPO hooks in the actor implementation when True
     use_seppo: bool = False
+    seppo_mode: str = "parameter"
     seppo_testing: bool = False
     seppo_static_fraction: float = 0.5
     seppo_dim: int = 32
