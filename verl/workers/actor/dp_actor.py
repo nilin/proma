@@ -171,13 +171,27 @@ class DataParallelPPOActor(BasePPOActor):
                         f"mcb_advantages": self.mcb_advantages,
                         })
 
+            def _bwd_hook_sequence(mod, grad_input, grad_output, dump=False, lname=None):
+                act_in = mod._seppo_act_in.clone()
+                _g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
+                g_out = _g_out.clone()
+
+                if act_in.dim() >= 3 and act_in.size(0) == 1:
+                    act_in = act_in[0]
+                if g_out.dim() >= 3 and g_out.size(0) == 1:
+                    g_out = g_out[0]
+
+                self.mcb_norms2 += (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
+
             if self.testing and i in [8,16,32,64,128]:
                 import functools
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(functools.partial(_bwd_hook, dump=True, lname=lname))
+                lmod.register_full_backward_hook(functools.partial(_bwd_hook_sequence, dump=True, lname=lname))
             else:
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(_bwd_hook)
+                lmod.register_full_backward_hook(_bwd_hook_sequence)
 
     def right_singular_rows(self, A: torch.Tensor, k: int, iterations: int = 3, skip_svd: bool = False) -> torch.Tensor:
         A = A.to(dtype=torch.float32)
@@ -648,8 +662,10 @@ class DataParallelPPOActor(BasePPOActor):
 
                     if self.seppo:
                         attention_mask = model_inputs["attention_mask"]
-                        advantages_w_prompt = torch.zeros_like(attention_mask)
-                        advantages_w_prompt[:, -advantages.shape[1]:] = advantages
+                        assert (advantages == advantages[..., -1:].expand_as(advantages)).all(), "advantages is not constant across the last dimension"
+                        advantages_w_prompt = advantages[..., -1:].expand_as(attention_mask)
+                        # advantages_w_prompt = torch.zeros_like(attention_mask)
+                        # advantages_w_prompt[:, -advantages.shape[1]:] = advantages
                         self.mcb_advantages = self.flatten_response_window(advantages_w_prompt, attention_mask)
                         self.loss_scale_factor = loss_scale_factor
 
