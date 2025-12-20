@@ -710,7 +710,7 @@ class DataParallelPPOActor(BasePPOActor):
                     ## SEPPO SEQUENCE MODE
                     if self.seppo and self.seppo_mode == "sequence":
                         seq_norms = self.seq_norms[mcb_idx]
-                        advantages = advantages / seq_norms.unsqueeze(1)
+                        advantages = advantages / seq_norms.unsqueeze(1).to(advantages.device)
                         print(f"seq_norms: {seq_norms}")
                     ################################################################################
 
