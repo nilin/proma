@@ -360,6 +360,11 @@ class DataParallelPPOActor(BasePPOActor):
             rollout_is_weights = model_inputs.get("rollout_is_weights", None)
             policy_loss_fn = get_policy_loss_fn(loss_mode)
 
+            if self.config.use_dynamic_bsz:
+                self.loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
+            else:
+                self.loss_scale_factor = 1 / self.gradient_accumulation
+
             ONES = torch.ones_like(advantages)
             pg_loss, pg_metrics = policy_loss_fn(
                 old_log_prob=old_log_prob,
