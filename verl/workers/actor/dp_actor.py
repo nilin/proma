@@ -381,6 +381,12 @@ class DataParallelPPOActor(BasePPOActor):
             self.norms2.append(seq_norms2)
             self.seq_norms.append(torch.tensor([torch.sqrt(torch.sum(seq)) for seq in seq_norms2]))
 
+            if self.testing or True:
+                os.makedirs("dump", exist_ok=True)
+                with open(f"dump/seq_len_and_norms.txt", "a") as f:
+                    for seq,seqnorm in zip(seq_norms2,self.seq_norms[-1]):
+                        f.write(f"{len(seq)},{seqnorm.item():.6f}\n")
+
         self.actor_optimizer.zero_grad()
         self.log_seq_grads_pass = False
 
