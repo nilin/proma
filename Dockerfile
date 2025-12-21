@@ -1,42 +1,40 @@
-# 1. Start with an image that has CUDA 12.4 and Conda pre-installed
-FROM mambaorg/micromamba:latest
+# 1. Use the NVIDIA image - it has the right CUDA, NCCL, and Python for H100
+FROM nvcr.io/nvidia/pytorch:24.03-py3
 
-# Switch to root to install system tools
-USER root
-RUN apt-get update && apt-get install -y curl git build-essential && rm -rf /var/lib/apt/lists/*
-
+# 2. Set the working directory
 WORKDIR /app
 
-# 2. Create the environment (Micromamba is a faster 'conda' drop-in)
-# This replaces your 'conda create' and 'anaconda.sh' lines
-RUN micromamba create -n suppo python=3.12 -c conda-forge -y
+# 3. Optimize the build for H100 (Hopper)
+ENV TORCH_CUDA_ARCH_LIST="9.0"
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Make sure all subsequent commands run in the 'suppo' environment
-ARG MAMBA_DOCKERFILE_LOGLEVEL=debug
-ENV PATH /opt/conda/envs/suppo/bin:$PATH
+# 4. Install system essentials needed for Ray and FlashAttention
+RUN apt-get update && apt-get install -y \
+    curl git build-essential ninja-build \
+    && rm -rf /var/lib/apt/lists/*
 
-# 3. Handle the "Heavy" installs
-# We copy ONLY the script needed for vllm/mcore first to cache the layer
-COPY scripts/install_vllm_sglang_mcore.sh ./scripts/
-RUN bash scripts/install_vllm_sglang_mcore.sh
+# 5. Install Python dependencies directly
+# We install ninja first so flash-attn builds in minutes, not hours
+RUN pip install --no-cache-dir --upgrade pip wheel setuptools && \
+    pip install --no-cache-dir ninja packaging
 
-# 4. Handle the "Math Problems" (FlashInfer & CUDA)
-# The base image already has CUDA, but we pin the environment variables
-ENV CUDA_HOME=/opt/conda/envs/suppo
-ENV FLASHINFER_CUDA_HOME=$CUDA_HOME
+# 6. Install Flash-Attention with "No Build Isolation"
+# This is the FIX for your PackageNotFoundError
+RUN pip install flash-attn --no-build-isolation
 
-RUN pip install flashinfer-python -i https://pypi.org/simple
-RUN pip install huggingface_hub[cli]
+# 7. Install the verl-specific stack (vLLM and Ray)
+# Note: ray[default] is often needed for the dashboard/workers
+RUN pip install vllm==0.5.4 ray[default]==2.10.0 transformers>=4.57.0 
 
-# 5. Copy the repo and install it
+# 8. Copy your repo and install it in editable mode
+# This uses your local setup.py instead of an environment.yml
 COPY . .
 RUN pip install --no-deps -e .
 
-# 6. Pre-download the model (This saves time during runtime!)
-# Note: This makes the image large, but very fast to start
-RUN huggingface-cli download Qwen/Qwen3-0.6B --local-dir ./models/Qwen3-0.6B
+# 9. Set the environment variables your script was looking for
+ENV CUDA_HOME=/usr/local/cuda
+ENV FLASHINFER_CUDA_HOME=/usr/local/cuda
+ENV PYTHONPATH=$PYTHONPATH:/app
 
-# Pre-process data so it's ready to go
-RUN python examples/data_preprocess/gsm8k.py
-
-CMD ["python", "your_main_script.py"]
+# Standard Ray ports
+EXPOSE 6379 8265 10001
