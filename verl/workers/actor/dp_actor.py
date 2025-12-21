@@ -386,6 +386,8 @@ class DataParallelPPOActor(BasePPOActor):
                 with open(f"dump/seq_len_and_norms.txt", "a") as f:
                     for seq,seqnorm in zip(seq_norms2,self.seq_norms[-1]):
                         f.write(f"{len(seq)},{seqnorm.item():.6f}\n")
+                    if mcb_idx == len(micro_batches) - 1:
+                        f.write("\n")
 
         self.actor_optimizer.zero_grad()
         self.log_seq_grads_pass = False
