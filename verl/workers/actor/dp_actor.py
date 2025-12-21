@@ -106,7 +106,11 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
 
         if self.seppo:
-            assert self.seppo_mode in ["parameter", "sequence"], "seppo_mode must be either parameter or sequence"
+            assert self.seppo_mode in ["parameter", "sequence", "both"], "seppo_mode must be either parameter or sequence or both"
+            self.seppo_parameter = self.seppo_mode in ["parameter", "both"]
+            self.seppo_sequence = self.seppo_mode in ["sequence", "both"]
+            print(f"self.seppo_parameter: {self.seppo_parameter}")
+            print(f"self.seppo_sequence: {self.seppo_sequence}")
 
             self.install_seppo_hooks()
             self.reset_seppo_stats()
@@ -151,13 +155,21 @@ class DataParallelPPOActor(BasePPOActor):
                 if g_out.dim() >= 3 and g_out.size(0) == 1:
                     g_out = g_out[0]
 
-                if self.seppo_mode == "sequence" and self.log_grads:
+                if self.seppo_sequence and self.log_seq_grads_pass:
                     self.norms2_cache += (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
 
-                if self.seppo_mode == "parameter":
-                    non0 = self.mcb_advantages != 0
-                    act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None].to(device=act_in.device, dtype=act_in.dtype)
-                    g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None].to(device=g_out.device, dtype=g_out.dtype)
+                if self.seppo_parameter:
+                    if self.seppo_sequence:
+                        # If a sequence seppo precomputing pass is being used then (only) the precomputing step is used for param seppo hooks too.
+                        # In this case advantages are already turned off.
+                        if not self.log_seq_grads_pass:
+                            return
+                    else:
+                        # There is no separate precomputing pass. Advantages need to be canceled out.
+                        non0 = self.mcb_advantages != 0
+                        act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None].to(device=act_in.device, dtype=act_in.dtype)
+                        g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None].to(device=g_out.device, dtype=g_out.dtype)
+
                     g_out = g_out / self.loss_scale_factor
 
                     if act_in.shape[-1] > self.seppo_len_lim:
@@ -325,7 +337,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         self.norms2 = []
         self.seq_norms = []
-        self.log_grads = True
+        self.log_seq_grads_pass = True
 
         for mcb_idx, micro_batch in enumerate(micro_batches):
             self.norms2_cache = 0.0
@@ -365,7 +377,7 @@ class DataParallelPPOActor(BasePPOActor):
             self.seq_norms.append(torch.tensor([torch.sqrt(torch.sum(seq)) for seq in seq_norms2]))
 
         self.actor_optimizer.zero_grad()
-        self.log_grads = False
+        self.log_seq_grads_pass = False
 
     #########################################################
 
@@ -695,8 +707,8 @@ class DataParallelPPOActor(BasePPOActor):
                 self.actor_optimizer.zero_grad()
 
                 ################################################################################
-                ## SEPPO SEQUENCE MODE
-                if self.seppo and self.seppo_mode == "sequence":
+                ## SEPPO SEQUENCE MODE: Precompute grad norms
+                if self.seppo and self.seppo_sequence:
                     self.precompute_mcb_norms2(micro_batches, temperature, on_policy)
                 ################################################################################
 
@@ -719,7 +731,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                     ################################################################################
                     ## SEPPO PARAMETER MODE
-                    if self.seppo and self.seppo_mode == "parameter":
+                    if self.seppo and self.seppo_parameter:
                         attention_mask = model_inputs["attention_mask"]
                         advantages_w_prompt = advantages[..., :1].expand_as(attention_mask) * attention_mask
                         assert torch.allclose(advantages_w_prompt[:, -advantages.shape[1]:], advantages), advantages_w_prompt
@@ -729,7 +741,7 @@ class DataParallelPPOActor(BasePPOActor):
                         self.loss_scale_factor = loss_scale_factor
                     ################################################################################
                     ## SEPPO SEQUENCE MODE
-                    if self.seppo and self.seppo_mode == "sequence":
+                    if self.seppo and self.seppo_sequence:
                         seq_norms = self.seq_norms[mcb_idx]
                         advantages = advantages / seq_norms.unsqueeze(1).to(advantages.device)
                         print(f"seq_norms: {seq_norms}")
@@ -815,7 +827,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                 ################################################################################
                 ## SEPPO PARAMETER MODE
-                if self.seppo and self.seppo_mode == "parameter":
+                if self.seppo and self.seppo_parameter:
                     for lname, lmod in self.linear_modules.items():
                         for pname, p in lmod.named_parameters(recurse=False):
                             dtg = p.grad
