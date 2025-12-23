@@ -87,16 +87,17 @@ switch-alg \
     +actor_rollout_ref.actor.seppo_mode=sequence \
     trainer.experiment_name=seppo-seq
 
-switch-alg \
-    $pure \
-    +actor_rollout_ref.actor.use_seppo=True \
-    +actor_rollout_ref.actor.seppo_mode=parameter \
-    +actor_rollout_ref.actor.seppo_testing=False \
-    +actor_rollout_ref.actor.seppo_dim=20 \
-    +actor_rollout_ref.actor.seppo_ema_decay=0.8 \
-    +actor_rollout_ref.actor.seppo_min_preconditioner=0.5 \
-    +actor_rollout_ref.actor.seppo_linear_interpolation=True \
-    +actor_rollout_ref.actor.seppo_squared=False \
-    +actor_rollout_ref.actor.seppo_adjustment_threshold=1e9 \
-    +actor_rollout_ref.actor.seppo_skip_rank_1=False \
-    trainer.experiment_name=seppo
+#switch-alg \
+#    $pure \
+#    +actor_rollout_ref.actor.use_seppo=True \
+#    +actor_rollout_ref.actor.seppo_mode=parameter \
+#    +actor_rollout_ref.actor.seppo_testing=False \
+#    +actor_rollout_ref.actor.seppo_dim=20 \
+#    +actor_rollout_ref.actor.seppo_ema_decay=0.8 \
+#    +actor_rollout_ref.actor.seppo_min_preconditioner=0.5 \
+#    +actor_rollout_ref.actor.seppo_linear_interpolation=True \
+#    +actor_rollout_ref.actor.seppo_squared=False \
+#    +actor_rollout_ref.actor.seppo_adjustment_threshold=1e9 \
+#    +actor_rollout_ref.actor.seppo_skip_rank_1=False \
+#    trainer.experiment_name=seppo
+#
