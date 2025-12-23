@@ -367,7 +367,12 @@ class DataParallelPPOActor(BasePPOActor):
 
     def unflatten_attention_mask(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         res = torch.zeros(attention_mask.shape[:2]+flat_x.shape[1:], device=attention_mask.device, dtype=flat_x.dtype)
-        res.masked_scatter_(attention_mask.bool(), flat_x)
+        #res.masked_scatter_(attention_mask.bool(), flat_x)
+        start = 0
+        for i in range(attention_mask.shape[0]):
+            end = start + attention_mask[i].sum()
+            res[i, attention_mask[i]] = flat_x[start:end]
+            start = end
         return res
 
     def unflatten_attention_mask_list(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> list[torch.Tensor]:
