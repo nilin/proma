@@ -78,7 +78,7 @@ switch-alg () {
 # pure means no clipping, i.e. reinforce and not ppo
 pure="actor_rollout_ref.actor.clip_ratio=1e9 actor_rollout_ref.actor.clip_ratio_high=1e9 actor_rollout_ref.actor.clip_ratio_low=1e9 actor_rollout_ref.actor.clip_ratio_c=1e9"
 
-test="data.max_prompt_length=128 data.max_response_length=256 trainer.val_before_train=False data.train_batch_size=64 trainer.project_name=test-suppo"
+test="trainer.val_before_train=False trainer.project_name=test-suppo"
 
 
 switch-alg \
