@@ -49,7 +49,7 @@ python3 -m verl.trainer.main_ppo \
 }
 
 
-switch-alg-2updates () {
+switch-alg () {
     switch-alg \
 	data.train_batch_size=128 \
         actor_rollout_ref.actor.ppo_mini_batch_size=64 \
@@ -73,23 +73,21 @@ switch-alg-2updates () {
     bash run/next.sh
 }
 
-switch-alg-2updates \
+# pure means no clipping, i.e. reinforce and not ppo
+pure="actor_rollout_ref.actor.clip_ratio=1e9 actor_rollout_ref.actor.clip_ratio_high=1e9 actor_rollout_ref.actor.clip_ratio_low=1e9 actor_rollout_ref.actor.clip_ratio_c=1e9"
+
+TEST="data.max_prompt_length=128 data.max_response_length=256 trainer.val_before_train=False data.train_batch_size=64"
+
+#+actor_rollout_ref.actor.seppo_testing=False \
+
+switch-alg \
+    $pure \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=sequence \
-    +actor_rollout_ref.actor.seppo_testing=False \
     trainer.experiment_name=seppo-seq
 
 switch-alg-2updates \
-    +actor_rollout_ref.actor.use_seppo=True \
-    +actor_rollout_ref.actor.seppo_mode=sequence \
-    +actor_rollout_ref.actor.seppo_testing=False \
-    trainer.experiment_name=seppo-seq-noclip \
-    actor_rollout_ref.actor.clip_ratio=1e9 \
-    actor_rollout_ref.actor.clip_ratio_high=1e9 \
-    actor_rollout_ref.actor.clip_ratio_low=1e9 \
-    actor_rollout_ref.actor.clip_ratio_c=1e9 
-
-switch-alg-2updates \
+    $pure \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=parameter \
     +actor_rollout_ref.actor.seppo_testing=False \
@@ -101,21 +99,3 @@ switch-alg-2updates \
     +actor_rollout_ref.actor.seppo_adjustment_threshold=1e9 \
     +actor_rollout_ref.actor.seppo_skip_rank_1=False \
     trainer.experiment_name=seppo
-
-switch-alg-2updates \
-    +actor_rollout_ref.actor.use_seppo=True \
-    +actor_rollout_ref.actor.seppo_mode=parameter \
-    +actor_rollout_ref.actor.seppo_testing=False \
-    +actor_rollout_ref.actor.seppo_dim=20 \
-    +actor_rollout_ref.actor.seppo_ema_decay=0.8 \
-    +actor_rollout_ref.actor.seppo_min_preconditioner=0.5 \
-    +actor_rollout_ref.actor.seppo_linear_interpolation=True \
-    +actor_rollout_ref.actor.seppo_squared=False \
-    +actor_rollout_ref.actor.seppo_adjustment_threshold=1e9 \
-    +actor_rollout_ref.actor.seppo_skip_rank_1=False \
-    trainer.experiment_name=seppo-noclip \
-    actor_rollout_ref.actor.clip_ratio=1e9 \
-    actor_rollout_ref.actor.clip_ratio_high=1e9 \
-    actor_rollout_ref.actor.clip_ratio_low=1e9 \
-    actor_rollout_ref.actor.clip_ratio_c=1e9 
-
