@@ -155,8 +155,14 @@ class DataParallelPPOActor(BasePPOActor):
                 if g_out.dim() >= 3 and g_out.size(0) == 1:
                     g_out = g_out[0]
 
-                if self.seppo_sequence and self.log_seq_grads_pass:
-                    self.norms2_cache += (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
+                if self.seppo_sequence:
+                    act_in_seqs = self.unflatten_attention_mask(act_in, self.attention_mask)
+                    g_out_seqs = self.unflatten_attention_mask(g_out, self.attention_mask)
+                    grad = 0.0
+                    for act_in_seq, g_out_seq, advantage in zip(act_in_seqs, g_out_seqs, self.seq_advantages):
+                        seq_grad = torch.sum(g_out_seq[:,:,None] * act_in_seq[:,None,:], dim=0)
+                        grad += seq_grad / torch.norm(seq_grad, dim=0) * abs(advantage)
+                    mod.suppo_grad = grad
 
                 if self.seppo_parameter:
                     if self.seppo_sequence:
@@ -719,11 +725,11 @@ class DataParallelPPOActor(BasePPOActor):
 
                 self.actor_optimizer.zero_grad()
 
-                ################################################################################
-                ## SEPPO SEQUENCE MODE: Precompute grad norms
-                if self.seppo and self.seppo_sequence:
-                    self.precompute_mcb_norms2(micro_batches, temperature, on_policy)
-                ################################################################################
+                #################################################################################
+                ### SEPPO SEQUENCE MODE: Precompute grad norms
+                #if self.seppo and self.seppo_sequence:
+                #    self.precompute_mcb_norms2(micro_batches, temperature, on_policy)
+                #################################################################################
 
                 for mcb_idx, micro_batch in enumerate(micro_batches):
                     self.projection_block = self.projections[mcb_idx]
@@ -755,9 +761,8 @@ class DataParallelPPOActor(BasePPOActor):
                     ################################################################################
                     ## SEPPO SEQUENCE MODE
                     if self.seppo and self.seppo_sequence:
-                        seq_norms = self.seq_norms[mcb_idx]
-                        advantages = advantages / seq_norms.unsqueeze(1).to(advantages.device)
-                        print(f"seq_norms: {seq_norms}")
+                        self.seq_advantages = advantages[:, 0].to(attention_mask.device)
+                        self.attention_mask = attention_mask
                     ################################################################################
 
                     # all return: (bsz, response_length)
@@ -840,7 +845,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                 ################################################################################
                 ## SEPPO PARAMETER MODE
-                if self.seppo and self.seppo_parameter:
+                if self.seppo:
                     for lname, lmod in self.linear_modules.items():
                         for pname, p in lmod.named_parameters(recurse=False):
                             dtg = p.grad
@@ -910,10 +915,14 @@ class DataParallelPPOActor(BasePPOActor):
                                 print()
                                 return grad + grad_adjustment
 
+                            if self.seppo_sequence:
+                                print(f"g_local: {g_local.shape} {type(g_local)}")
+                                print(f"lmod.suppo_grad: {lmod.suppo_grad.shape} {type(lmod.suppo_grad)}")
+                                grad_transformed = 0.0 * g_local.clone() + lmod.suppo_grad
+                            else:
+                                grad_transformed = g_local.clone()
 
-                            grad_transformed = g_local.clone()
-
-                            if len(lmod.a_proj) > 0:
+                            if self.seppo_parameter and len(lmod.a_proj) > 0:
                                 g_proj = torch.cat(lmod.g_proj, dim=0)
                                 a_proj = torch.cat(lmod.a_proj, dim=0)
                                 lmod.a_proj.clear()
