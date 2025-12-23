@@ -80,6 +80,9 @@ pure="actor_rollout_ref.actor.clip_ratio=1e9 actor_rollout_ref.actor.clip_ratio_
 
 test="trainer.val_before_train=False trainer.project_name=test-suppo"
 
+sgd="actor_rollout_ref.actor.optim.optimizer=SGD actor_rollout_ref.actor.optim.optimizer_impl=torch.optim actor_rollout_ref.actor.optim.lr=0.01"
+
+lr=actor_rollout_ref.actor.optim.lr
 
 switch-alg \
     $pure \
