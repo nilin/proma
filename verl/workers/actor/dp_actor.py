@@ -181,7 +181,7 @@ class DataParallelPPOActor(BasePPOActor):
                             noise = torch.norm(_a)*torch.norm(_g)
 
                         p,q = self.seppo_norm_power, self.seppo_noise_power
-                        scaling = abs(advantage).pow(p+q) / (torch.norm(seq_grad, dim=0).pow(p)*noise.pow(q) + 1e-8)
+                        scaling = abs(advantage).pow(p+q) / (torch.norm(seq_grad).pow(p)*noise.pow(q) + 1e-8)
                         grad += scaling * seq_grad 
 
                     if hasattr(mod, "suppo_grad"):
