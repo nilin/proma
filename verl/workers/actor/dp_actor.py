@@ -778,6 +778,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                     ################################################################################
                     if self.seppo:
+                        self.test_flatten_unflatten(model_inputs["attention_mask"])
                         ## SEPPO PARAMETER MODE
                         attention_mask = model_inputs["attention_mask"]
                         advantages_w_prompt = advantages[..., :1].expand_as(attention_mask) * attention_mask
