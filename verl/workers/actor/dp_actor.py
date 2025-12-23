@@ -359,11 +359,11 @@ class DataParallelPPOActor(BasePPOActor):
         res.masked_scatter_(attention_mask.bool(), x)
         return res
 
-    def unflatten_attention_mask_list(self, x: torch.Tensor, attention_mask: torch.Tensor) -> list[torch.Tensor]:
+    def unflatten_attention_mask_list(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> list[torch.Tensor]:
         res = []
-        for i in range(len(attention_mask)):
-            block = x[i, attention_mask[i]]
-            res.append(block)
+        unflat_x = self.unflatten_attention_mask(flat_x, attention_mask)
+        for row, a in zip(unflat_x, attention_mask):
+            res.append(row[a])
         return res
 
     # same as in the training loop, but without parameter updates and without advantages
