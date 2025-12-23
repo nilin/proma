@@ -119,6 +119,13 @@ class DataParallelPPOActor(BasePPOActor):
             self.reset_seppo_stats()
 
         print(f"self.actor_optimizer: {self.actor_optimizer}")
+        try:
+            import torch.optim as optim
+            is_sgd = isinstance(self.actor_optimizer, optim.SGD) or self.actor_optimizer.__class__.__name__.lower() == "sgd"
+            print(f"is_sgd: {is_sgd}")
+        except Exception:
+            pass
+
         self.done_tests = set()
 
     #########################################################
@@ -166,7 +173,7 @@ class DataParallelPPOActor(BasePPOActor):
                         seq_grad = g_out_seq.T @ act_in_seq
 
                         _g = g_out_seq - torch.mean(g_out_seq, dim=0, keepdim=True)
-                        _a = advantage - torch.mean(advantage, dim=0, keepdim=True)
+                        _a = act_in_seq - torch.mean(act_in_seq, dim=0, keepdim=True)
 
                         if self.seppo_big_noise:
                             noise = torch.sqrt(_g.pow(2).T @ _a.pow(2))
