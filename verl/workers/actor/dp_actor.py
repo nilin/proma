@@ -160,7 +160,7 @@ class DataParallelPPOActor(BasePPOActor):
                     g_out_seqs = self.unflatten_attention_mask(g_out, self.attention_mask)
                     grad = 0.0
                     for act_in_seq, g_out_seq, advantage in zip(act_in_seqs, g_out_seqs, self.seq_advantages):
-                        seq_grad = torch.sum(g_out_seq[:,:,None] * act_in_seq[:,None,:], dim=0)
+                        seq_grad = g_out_seq.T @ act_in_seq
                         grad += seq_grad / (torch.norm(seq_grad, dim=0) * abs(advantage) + 1e-8)
                     mod.suppo_grad = grad
 
