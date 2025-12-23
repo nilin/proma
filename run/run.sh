@@ -85,7 +85,9 @@ switch-alg \
     $pure \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=sequence \
-    trainer.experiment_name=seppo-seq
+    trainer.experiment_name=seppo-seq \
+    +actor_rollout_ref.actor.seppo_norm_power=0.0 \
+    +actor_rollout_ref.actor.seppo_noise_power=1.0 
 
 #switch-alg \
 #    $pure \

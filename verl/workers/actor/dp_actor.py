@@ -104,6 +104,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
         self.seppo_adjustment_threshold = self.config.get("seppo_adjustment_threshold", 0.2)
         self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
+        self.seppo_norm_power = self.config.get("seppo_norm_power", 0.0)
+        self.seppo_noise_power = self.config.get("seppo_noise_power", 1.0)
 
         if self.seppo:
             assert self.seppo_mode in ["parameter", "sequence", "both"], "seppo_mode must be either parameter or sequence or both"
@@ -161,7 +163,14 @@ class DataParallelPPOActor(BasePPOActor):
                     grad = 0.0
                     for act_in_seq, g_out_seq, advantage in zip(act_in_seqs, g_out_seqs, self.seq_advantages):
                         seq_grad = g_out_seq.T @ act_in_seq
-                        grad += seq_grad / (torch.norm(seq_grad, dim=0) + 1e-8) * abs(advantage)
+
+                        _g = g_out_seq - torch.mean(g_out_seq, dim=0, keepdim=True)
+                        _a = advantage - torch.mean(advantage, dim=0, keepdim=True)
+                        noise = torch.norm(_a)*torch.norm(_g)
+
+                        p,q = self.seppo_norm_power, self.seppo_noise_power
+                        scaling = abs(advantage).pow(p+q) / (torch.norm(seq_grad, dim=0).pow(p)*noise.pow(q) + 1e-8)
+                        grad += scaling * seq_grad 
 
                     if hasattr(mod, "suppo_grad"):
                         mod.suppo_grad += grad

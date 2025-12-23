@@ -124,6 +124,8 @@ class ActorConfig(BaseConfig):
     seppo_len_lim: int = 6000
     seppo_adjustment_threshold: float = 0.2
     seppo_skip_rank_1: bool = False
+    seppo_norm_power: float = 0.0
+    seppo_noise_power: float = 1.0
     ppo_epochs: int = 1
     shuffle: bool = False
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
