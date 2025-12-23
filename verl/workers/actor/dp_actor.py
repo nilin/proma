@@ -228,7 +228,7 @@ class DataParallelPPOActor(BasePPOActor):
                 lmod.a_proj = []
                 lmod.g_proj = []
 
-    def flatten_response_window(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+    def flatten_attention_mask(self, x: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Flatten non-padding response tokens to (N, ...).
 
         - Input `x` has shape `(B, R)` or `(B, R, H, ...)`.
@@ -334,7 +334,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         x = torch.randn(attention_mask.shape[0], attention_mask.shape[1], 5, device=attention_mask.device) * attention_mask[:,:,None]
 
-        flat_x = self.flatten_response_window(x, attention_mask)
+        flat_x = self.flatten_attention_mask(x, attention_mask)
         unflat_x = self.unflatten_attention_mask(flat_x, attention_mask)
         unflat_x_list = self.unflatten_attention_mask_list(flat_x, attention_mask)
 
@@ -357,7 +357,7 @@ class DataParallelPPOActor(BasePPOActor):
         return unflat_x
 
     def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        res = torch.zeros(attention_mask.shape[0], attention_mask.shape[1], device=attention_mask.device, dtype=x.dtype)
+        res = torch.zeros(attention_mask.shape, device=attention_mask.device, dtype=x.dtype)
         res.masked_scatter_(attention_mask.bool(), x)
         return res
 
@@ -367,66 +367,6 @@ class DataParallelPPOActor(BasePPOActor):
         for row, a in zip(unflat_x, attention_mask):
             res.append(row[a])
         return res
-
-    # same as in the training loop, but without parameter updates and without advantages
-    def precompute_mcb_norms2(self, micro_batches, temperature, on_policy=False):
-
-        self.norms2 = []
-        self.seq_norms = []
-        self.log_seq_grads_pass = True
-
-        for mcb_idx, micro_batch in enumerate(micro_batches):
-            self.norms2_cache = 0.0
-
-            micro_batch = micro_batch.to(get_device_id())
-            model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
-
-            entropy, log_prob = self._forward_micro_batch(
-                model_inputs, temperature=temperature, calculate_entropy=False
-            )
-            #version 1 hardcoded equal weight tokens
-            #log_prob.sum().backward()
-
-            #version 2 token weight adapts to aggregation method (cancels out agg method)
-            response_mask = model_inputs["response_mask"]
-            old_log_prob = model_inputs["old_log_probs"]
-            advantages = model_inputs["advantages"]
-            loss_agg_mode = self.config.loss_agg_mode
-            loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
-            rollout_is_weights = model_inputs.get("rollout_is_weights", None)
-            policy_loss_fn = get_policy_loss_fn(loss_mode)
-
-            if self.config.use_dynamic_bsz:
-                self.loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
-            else:
-                self.loss_scale_factor = 1 / self.gradient_accumulation
-
-            ONES = torch.ones_like(advantages)
-            pg_loss, pg_metrics = policy_loss_fn(
-                old_log_prob=old_log_prob,
-                log_prob=log_prob,
-                advantages=ONES,
-                response_mask=response_mask,
-                loss_agg_mode=loss_agg_mode,
-                config=self.config,
-                rollout_is_weights=rollout_is_weights,
-            )
-            pg_loss.backward()
-
-            seq_norms2 = self.unflatten_attention_mask_list(self.norms2_cache, model_inputs["attention_mask"])
-            self.norms2.append(seq_norms2)
-            self.seq_norms.append(torch.tensor([torch.sqrt(torch.sum(seq)) for seq in seq_norms2]))
-
-            if self.testing or True:
-                os.makedirs("dump", exist_ok=True)
-                with open(f"dump/seq_len_and_norms.txt", "a") as f:
-                    for seq,seqnorm in zip(seq_norms2,self.seq_norms[-1]):
-                        f.write(f"{len(seq)},{seqnorm.item():.6f}\n")
-                    if mcb_idx == len(micro_batches) - 1:
-                        f.write("\n")
-
-        self.actor_optimizer.zero_grad()
-        self.log_seq_grads_pass = False
 
     #########################################################
 
@@ -785,7 +725,7 @@ class DataParallelPPOActor(BasePPOActor):
                         attention_mask = model_inputs["attention_mask"]
                         advantages_w_prompt = advantages[..., :1].expand_as(attention_mask) * attention_mask
                         assert torch.allclose(advantages_w_prompt[:, -advantages.shape[1]:], advantages), advantages_w_prompt
-                        self.mcb_advantages = self.flatten_response_window(advantages_w_prompt, attention_mask)
+                        self.mcb_advantages = self.flatten_attention_mask(advantages_w_prompt, attention_mask)
                         self.loss_scale_factor = loss_scale_factor
 
                         ## SEPPO SEQUENCE MODE
