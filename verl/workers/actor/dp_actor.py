@@ -157,8 +157,8 @@ class DataParallelPPOActor(BasePPOActor):
                     g_out = g_out[0]
 
                 if self.seppo_sequence:
-                    act_in_seqs = self.unflatten_attention_mask(act_in, self.attention_mask)
-                    g_out_seqs = self.unflatten_attention_mask(g_out, self.attention_mask)
+                    act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
+                    g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
                     grad = 0.0
                     for act_in_seq, g_out_seq, advantage in zip(act_in_seqs, g_out_seqs, self.seq_advantages):
                         seq_grad = g_out_seq.T @ act_in_seq
@@ -411,7 +411,7 @@ class DataParallelPPOActor(BasePPOActor):
             )
             pg_loss.backward()
 
-            seq_norms2 = self.unflatten_attention_mask(self.norms2_cache, model_inputs["attention_mask"])
+            seq_norms2 = self.unflatten_attention_mask_list(self.norms2_cache, model_inputs["attention_mask"])
             self.norms2.append(seq_norms2)
             self.seq_norms.append(torch.tensor([torch.sqrt(torch.sum(seq)) for seq in seq_norms2]))
 
