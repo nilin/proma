@@ -334,12 +334,8 @@ class DataParallelPPOActor(BasePPOActor):
 
         x = torch.randn(attention_mask.shape[0], attention_mask.shape[1], device=attention_mask.device) * attention_mask
         flat_x = self.flatten_response_window(x, attention_mask)
-        unflat_x = self.unflatten_attention_mask(flat_x, attention_mask, mode="tensor")
-        assert torch.allclose(x, unflat_x)
-
-        print(f"x sparse: {x[:2, ::10]}")
-        print(f"unflat_x sparse: {unflat_x[:2, ::10]}")
-        print("flatten and unflatten test passed")
+        unflat_x = self.unflatten_attention_mask(flat_x, attention_mask)
+        unflat_x_list = self.unflatten_attention_mask_list(flat_x, attention_mask)
 
         import pandas as pd
         import numpy as np
@@ -348,24 +344,28 @@ class DataParallelPPOActor(BasePPOActor):
         pd.DataFrame(x.detach().cpu().float().numpy()).to_parquet(f"dump/x_{id}.parquet")
         pd.DataFrame(flat_x.detach().cpu().float().numpy()).to_parquet(f"dump/flat_x_{id}.parquet")
         pd.DataFrame(unflat_x.detach().cpu().float().numpy()).to_parquet(f"dump/unflat_x_{id}.parquet")
+
+        assert torch.allclose(x, unflat_x)
+        for a, x, y in zip(attention_mask, x, unflat_x_list):
+            assert torch.allclose(x[a], y)
+
+        print(f"x sparse: {x[:2, ::10]}")
+        print(f"unflat_x sparse: {unflat_x[:2, ::10]}")
+        print("flatten and unflatten test passed")
         return unflat_x
 
-    def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor, mode="list") -> torch.Tensor:
-        res_list = []
+    def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         res = torch.zeros(attention_mask.shape[0], attention_mask.shape[1], device=attention_mask.device, dtype=x.dtype)
-        start = 0
-        for i in range(len(attention_mask)):
-            indices = attention_mask[i].nonzero()
-            block = x[start:start+len(indices)]
-            res_list.append(block)
-            res[i, indices] = block
-            start += len(indices)
+        res.masked_scatter_(attention_mask.bool(), x)
+        return res
 
-        if mode == "list":
-            return res_list
-        elif mode == "tensor":
-            return res
-    
+    def unflatten_attention_mask_list(self, x: torch.Tensor, attention_mask: torch.Tensor) -> list[torch.Tensor]:
+        res = []
+        for i in range(len(attention_mask)):
+            block = x[i, attention_mask[i]]
+            res.append(block)
+        return res
+
     # same as in the training loop, but without parameter updates and without advantages
     def precompute_mcb_norms2(self, micro_batches, temperature, on_policy=False):
 
