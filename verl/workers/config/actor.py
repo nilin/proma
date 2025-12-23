@@ -126,6 +126,7 @@ class ActorConfig(BaseConfig):
     seppo_skip_rank_1: bool = False
     seppo_norm_power: float = 0.0
     seppo_noise_power: float = 1.0
+    seppo_big_noise: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
