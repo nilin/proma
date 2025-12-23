@@ -161,7 +161,7 @@ class DataParallelPPOActor(BasePPOActor):
                     grad = 0.0
                     for act_in_seq, g_out_seq, advantage in zip(act_in_seqs, g_out_seqs, self.seq_advantages):
                         seq_grad = g_out_seq.T @ act_in_seq
-                        grad += seq_grad / (torch.norm(seq_grad, dim=0) * abs(advantage) + 1e-8)
+                        grad += seq_grad / (torch.norm(seq_grad, dim=0) + 1e-8) * abs(advantage)
 
                     if hasattr(mod, "suppo_grad"):
                         mod.suppo_grad += grad
