@@ -117,8 +117,6 @@ class DataParallelPPOActor(BasePPOActor):
 
         print(f"self.actor_optimizer: {self.actor_optimizer}")
         self.done_tests = set()
-        os.makedirs("dump", exist_ok=True)
-
 
     #########################################################
 
@@ -319,10 +317,11 @@ class DataParallelPPOActor(BasePPOActor):
         return self.ema[name]
 
     def dump_tensors(self, **tensors):
-        import pandas as pd
+        import numpy as np
         os.makedirs("dump", exist_ok=True)
         for key, value in tensors.items():
-            pd.DataFrame(value.detach().cpu().float().numpy()).to_parquet(f"dump/{key}.parquet")
+            arr = value.detach().cpu().float().numpy()
+            np.save(f"dump/{key}.npy", arr)
 
     #########################################################
     # seqwise seppo
@@ -342,10 +341,13 @@ class DataParallelPPOActor(BasePPOActor):
         import pandas as pd
         import numpy as np
         id = np.random.randint(0, 1000000)
-        pd.DataFrame(attention_mask.detach().cpu().float().numpy()).to_parquet(f"dump/attention_mask_{id}.parquet")
-        pd.DataFrame(x.detach().cpu().float().numpy()).to_parquet(f"dump/x_{id}.parquet")
-        pd.DataFrame(flat_x.detach().cpu().float().numpy()).to_parquet(f"dump/flat_x_{id}.parquet")
-        pd.DataFrame(unflat_x.detach().cpu().float().numpy()).to_parquet(f"dump/unflat_x_{id}.parquet")
+
+        self.dump_tensors(**{
+            f"attention_mask_{id}": attention_mask,
+            f"x_{id}": x,
+            f"flat_x_{id}": flat_x,
+            f"unflat_x_{id}": unflat_x,
+        })
 
         assert torch.allclose(x, unflat_x)
         for a, x, y in zip(attention_mask, x, unflat_x_list):
