@@ -117,6 +117,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         print(f"self.actor_optimizer: {self.actor_optimizer}")
         self.done_tests = set()
+        os.makedirs("dump", exist_ok=True)
 
 
     #########################################################
