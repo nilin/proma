@@ -162,7 +162,11 @@ class DataParallelPPOActor(BasePPOActor):
                     for act_in_seq, g_out_seq, advantage in zip(act_in_seqs, g_out_seqs, self.seq_advantages):
                         seq_grad = g_out_seq.T @ act_in_seq
                         grad += seq_grad / (torch.norm(seq_grad, dim=0) * abs(advantage) + 1e-8)
-                    mod.suppo_grad = grad
+
+                    if hasattr(mod, "suppo_grad"):
+                        mod.suppo_grad += grad
+                    else:
+                        mod.suppo_grad = grad
 
                 if self.seppo_parameter:
                     non0 = self.mcb_advantages != 0
@@ -910,6 +914,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 print(f"g_local: {g_local.shape} {type(g_local)}")
                                 print(f"lmod.suppo_grad: {lmod.suppo_grad.shape} {type(lmod.suppo_grad)}")
                                 grad_transformed = 0.0 * g_local.clone() + lmod.suppo_grad
+                                lmod.suppo_grad = 0.0
                             else:
                                 grad_transformed = g_local.clone()
 
