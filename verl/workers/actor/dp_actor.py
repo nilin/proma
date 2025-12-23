@@ -350,8 +350,6 @@ class DataParallelPPOActor(BasePPOActor):
         for a, x, y in zip(attention_mask, x, unflat_x_list):
             assert torch.allclose(x[a], y)
 
-        print(f"x sparse: {x[:2, ::10]}")
-        print(f"unflat_x sparse: {unflat_x[:2, ::10]}")
         print("flatten and unflatten test passed")
         return unflat_x
 
