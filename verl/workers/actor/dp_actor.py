@@ -333,7 +333,8 @@ class DataParallelPPOActor(BasePPOActor):
             return
         self.done_tests.add("test_flatten_unflatten")
 
-        x = torch.randn(attention_mask.shape[0], attention_mask.shape[1], device=attention_mask.device) * attention_mask
+        x = torch.randn(attention_mask.shape[0], attention_mask.shape[1], 5, device=attention_mask.device) * attention_mask[:,:,None]
+
         flat_x = self.flatten_response_window(x, attention_mask)
         unflat_x = self.unflatten_attention_mask(flat_x, attention_mask)
         unflat_x_list = self.unflatten_attention_mask_list(flat_x, attention_mask)
