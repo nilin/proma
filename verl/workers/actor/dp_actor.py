@@ -365,9 +365,9 @@ class DataParallelPPOActor(BasePPOActor):
         print("flatten and unflatten test passed")
         return unflat_x
 
-    def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        res = torch.zeros(attention_mask.shape, device=attention_mask.device, dtype=x.dtype)
-        res.masked_scatter_(attention_mask.bool(), x)
+    def unflatten_attention_mask(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        res = torch.zeros(attention_mask.shape[:2]+flat_x.shape[1:], device=attention_mask.device, dtype=flat_x.dtype)
+        res.masked_scatter_(attention_mask.bool(), flat_x)
         return res
 
     def unflatten_attention_mask_list(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> list[torch.Tensor]:
