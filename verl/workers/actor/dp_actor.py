@@ -365,15 +365,24 @@ class DataParallelPPOActor(BasePPOActor):
         print("flatten and unflatten test passed")
         return unflat_x
 
-    def unflatten_attention_mask(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        res = torch.zeros(attention_mask.shape[:2]+flat_x.shape[1:], device=attention_mask.device, dtype=flat_x.dtype)
-        #res.masked_scatter_(attention_mask.bool(), flat_x)
-        start = 0
-        for i in range(attention_mask.shape[0]):
-            end = start + attention_mask[i].sum()
-            res[i, attention_mask[i]] = flat_x[start:end]
-            start = end
-        return res
+    #def unflatten_attention_mask(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    #    res = torch.zeros(attention_mask.shape[:2]+flat_x.shape[1:], device=attention_mask.device, dtype=flat_x.dtype)
+    #    #res.masked_scatter_(attention_mask.bool(), flat_x)
+    #    start = 0
+    #    for i in range(attention_mask.shape[0]):
+    #        end = start + attention_mask[i].sum()
+    #        res[i, attention_mask[i]] = flat_x[start:end]
+    #        start = end
+    #    return res
+
+    def unflatten_attention_mask(self, x_flat, attention_mask):
+        B, R = attention_mask.shape[:2]
+        m = attention_mask.view(B, R).to(x_flat.device).bool()
+        out = x_flat.new_zeros((B, R) + x_flat.shape[1:])
+        expected = int(m.sum().item())
+        assert x_flat.shape[0] == expected, f"flat len {x_flat.shape[0]} != mask sum {expected}"
+        out[m] = x_flat
+        return out
 
     def unflatten_attention_mask_list(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> list[torch.Tensor]:
         res = []
