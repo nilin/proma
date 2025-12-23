@@ -106,10 +106,9 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
 
         if self.seppo:
-            assert self.seppo_mode in ["parameter", "sequence", "sequence_2", "both"], "seppo_mode must be either parameter or sequence or both"
+            assert self.seppo_mode in ["parameter", "sequence", "both"], "seppo_mode must be either parameter or sequence or both"
             self.seppo_parameter = self.seppo_mode in ["parameter", "both"]
             self.seppo_sequence = self.seppo_mode in ["sequence", "both"]
-            self.seppo_sequence_2 = self.seppo_mode in ["sequence_2"]
             print(f"self.seppo_parameter: {self.seppo_parameter}")
             print(f"self.seppo_sequence: {self.seppo_sequence}")
 
@@ -158,13 +157,6 @@ class DataParallelPPOActor(BasePPOActor):
 
                 if self.seppo_sequence and self.log_seq_grads_pass:
                     self.norms2_cache += (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
-
-                if self.seppo_sequence_2:
-                    token_norms2 = (torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)).pow(2)
-                    seq_norms = torch.sqrt(torch.sum(self.unflatten_attention_mask(token_norms2, self.attention_mask), dim=1))
-                    scaling = torch.abs(self.seq_advantages) / (seq_norms + 1e-8)
-                    scaling = self.flatten_response_window(scaling, self.attention_mask)
-                    return grad_output * scaling
 
                 if self.seppo_parameter:
                     if self.seppo_sequence:
@@ -331,22 +323,13 @@ class DataParallelPPOActor(BasePPOActor):
     # seqwise seppo
     #########################################################
 
-    def unflatten_attention_mask_to_list(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         mcb_seq_idx = torch.arange(attention_mask.shape[0], device=attention_mask.device).unsqueeze(1).expand_as(attention_mask)
         flat_mcb_seq_idx = self.flatten_response_window(mcb_seq_idx, attention_mask)
         res = []
         for i in range(len(mcb_seq_idx)):
             indices = (flat_mcb_seq_idx == i)
             res.append(x[indices])
-        return res
-
-    def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        res = torch.zeros(attention_mask.shape[0], x.shape[1], device=x.device, dtype=x.dtype)
-        for i in range(len(attention_mask)):
-            indices = (attention_mask[i] == 1)
-            res[i, indices] = x[:len(indices)]
-            x = x[len(indices):]
-        assert len(x) == 0, f"x has {len(x)} elements left over"
         return res
     
     # same as in the training loop, but without parameter updates and without advantages
@@ -394,17 +377,17 @@ class DataParallelPPOActor(BasePPOActor):
             )
             pg_loss.backward()
 
-            seq_norms2 = self.unflatten_attention_mask_to_list(self.norms2_cache, model_inputs["attention_mask"])
+            seq_norms2 = self.unflatten_attention_mask(self.norms2_cache, model_inputs["attention_mask"])
             self.norms2.append(seq_norms2)
             self.seq_norms.append(torch.tensor([torch.sqrt(torch.sum(seq)) for seq in seq_norms2]))
 
             if self.testing or True:
                 os.makedirs("dump", exist_ok=True)
                 with open(f"dump/seq_len_and_norms.txt", "a") as f:
-                    if mcb_idx == 0:
-                        f.write("\n")
                     for seq,seqnorm in zip(seq_norms2,self.seq_norms[-1]):
                         f.write(f"{len(seq)},{seqnorm.item():.6f}\n")
+                    if mcb_idx == len(micro_batches) - 1:
+                        f.write("\n")
 
         self.actor_optimizer.zero_grad()
         self.log_seq_grads_pass = False
@@ -760,7 +743,6 @@ class DataParallelPPOActor(BasePPOActor):
                         loss_scale_factor = 1 / self.gradient_accumulation
 
                     ################################################################################
-
                     ## SEPPO PARAMETER MODE
                     if self.seppo and self.seppo_parameter:
                         attention_mask = model_inputs["attention_mask"]
@@ -770,17 +752,12 @@ class DataParallelPPOActor(BasePPOActor):
                         # advantages_w_prompt[:, -advantages.shape[1]:] = advantages
                         self.mcb_advantages = self.flatten_response_window(advantages_w_prompt, attention_mask)
                         self.loss_scale_factor = loss_scale_factor
-                    
+                    ################################################################################
                     ## SEPPO SEQUENCE MODE
                     if self.seppo and self.seppo_sequence:
                         seq_norms = self.seq_norms[mcb_idx]
                         advantages = advantages / seq_norms.unsqueeze(1).to(advantages.device)
                         print(f"seq_norms: {seq_norms}")
-
-                    ## SEPPO SEQUENCE MODE
-                    if self.seppo and self.seppo_sequence_2:
-                        self.attention_mask = model_inputs["attention_mask"]
-                        self.seq_advantages = model_inputs["advantages"][:, 0].to(self.attention_mask.device)
                     ################################################################################
 
                     # all return: (bsz, response_length)
