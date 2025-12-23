@@ -116,6 +116,7 @@ class DataParallelPPOActor(BasePPOActor):
             self.reset_seppo_stats()
 
         print(f"self.actor_optimizer: {self.actor_optimizer}")
+        self.done_tests = set()
 
 
     #########################################################
@@ -326,14 +327,44 @@ class DataParallelPPOActor(BasePPOActor):
     # seqwise seppo
     #########################################################
 
-    def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        mcb_seq_idx = torch.arange(attention_mask.shape[0], device=attention_mask.device).unsqueeze(1).expand_as(attention_mask)
-        flat_mcb_seq_idx = self.flatten_response_window(mcb_seq_idx, attention_mask)
-        res = []
-        for i in range(len(mcb_seq_idx)):
-            indices = (flat_mcb_seq_idx == i)
-            res.append(x[indices])
-        return res
+    def test_flatten_unflatten(self, attention_mask: torch.Tensor):
+        if "test_flatten_unflatten" in self.done_tests:
+            return
+        self.done_tests.add("test_flatten_unflatten")
+
+        x = torch.randn(attention_mask.shape[0], attention_mask.shape[1], device=attention_mask.device) * attention_mask
+        flat_x = self.flatten_response_window(x, attention_mask)
+        unflat_x = self.unflatten_attention_mask(flat_x, attention_mask, mode="tensor")
+        assert torch.allclose(x, unflat_x)
+
+        print(f"x sparse: {x[:2, ::10]}")
+        print(f"unflat_x sparse: {unflat_x[:2, ::10]}")
+        print("flatten and unflatten test passed")
+
+        import pandas as pd
+        import numpy as np
+        id = np.random.randint(0, 1000000)
+        pd.DataFrame(attention_mask.detach().cpu().float().numpy()).to_parquet(f"dump/attention_mask_{id}.parquet")
+        pd.DataFrame(x.detach().cpu().float().numpy()).to_parquet(f"dump/x_{id}.parquet")
+        pd.DataFrame(flat_x.detach().cpu().float().numpy()).to_parquet(f"dump/flat_x_{id}.parquet")
+        pd.DataFrame(unflat_x.detach().cpu().float().numpy()).to_parquet(f"dump/unflat_x_{id}.parquet")
+        return unflat_x
+
+    def unflatten_attention_mask(self, x: torch.Tensor, attention_mask: torch.Tensor, mode="list") -> torch.Tensor:
+        res_list = []
+        res = torch.zeros(attention_mask.shape[0], attention_mask.shape[1], device=attention_mask.device, dtype=x.dtype)
+        start = 0
+        for i in range(len(attention_mask)):
+            indices = attention_mask[i].nonzero()
+            block = x[start:start+len(indices)]
+            res_list.append(block)
+            res[i, indices] = block
+            start += len(indices)
+
+        if mode == "list":
+            return res_list
+        elif mode == "tensor":
+            return res
     
     # same as in the training loop, but without parameter updates and without advantages
     def precompute_mcb_norms2(self, micro_batches, temperature, on_policy=False):
@@ -911,8 +942,6 @@ class DataParallelPPOActor(BasePPOActor):
                                 return grad + grad_adjustment
 
                             if self.seppo_sequence:
-                                print(f"g_local: {g_local.shape} {type(g_local)}")
-                                print(f"lmod.suppo_grad: {lmod.suppo_grad.shape} {type(lmod.suppo_grad)}")
                                 grad_transformed = 0.0 * g_local.clone() + lmod.suppo_grad
                                 lmod.suppo_grad = 0.0
                             else:
