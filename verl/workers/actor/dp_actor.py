@@ -106,6 +106,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
         self.seppo_norm_power = self.config.get("seppo_norm_power", 0.0)
         self.seppo_noise_power = self.config.get("seppo_noise_power", 1.0)
+        self.seppo_overlap_power = self.config.get("seppo_overlap_power", 0.0)
         self.seppo_big_noise = self.config.get("seppo_big_noise", False)
 
         if self.seppo:
@@ -176,12 +177,15 @@ class DataParallelPPOActor(BasePPOActor):
                         if self.seppo_big_noise:
                             noise = torch.sqrt(_g.pow(2).T @ _a.pow(2))
                         else:
-                            noise = torch.norm(_a)*torch.norm(_g)
+                            noise = torch.norm(torch.norm(_a, dim=1) * torch.norm(_g, dim=1))
 
-                        p,q = self.seppo_norm_power, self.seppo_noise_power
+                        overlaps = torch.sum((g_out_seq @ seq_grad) * act_in_seq, dim=1)
+                        overlap = torch.sqrt(torch.mean(overlaps.pow(2)))
+
+                        p,q,r = self.seppo_norm_power, self.seppo_noise_power, self.seppo_overlap_power
 
                         if self.include_advantages_in_loss:
-                            scaling = abs(advantage).pow(p+q) / (torch.norm(seq_grad).pow(p)*noise.pow(q) + 1e-8)
+                            scaling = abs(advantage).pow(p+q+2*r) / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
                         else:
                             scaling = -advantage / (torch.norm(seq_grad).pow(p)*noise.pow(q) + 1e-8)
 
