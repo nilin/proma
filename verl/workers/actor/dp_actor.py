@@ -186,7 +186,9 @@ class DataParallelPPOActor(BasePPOActor):
                         if self.include_advantages_in_loss:
                             scaling = abs(advantage).pow(p+q+2*r) / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
                         else:
-                            scaling = advantage / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
+                            rescaling = 1.0 / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
+                            print(f"rescaling: {rescaling}")
+                            scaling = rescaling * advantage
 
                         grad += scaling * seq_grad 
 
