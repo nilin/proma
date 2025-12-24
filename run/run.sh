@@ -92,10 +92,11 @@ switch-alg \
     +actor_rollout_ref.actor.seppo_norm_power=0.0 \
     +actor_rollout_ref.actor.seppo_noise_power=1.0 \
     +actor_rollout_ref.actor.seppo_overlap_power=0.0 \
-    +actor_rollout_ref.actor.seppo_big_noise=True \
-    +actor_rollout_ref.actor.separate_advantages=True \
-    $sgd \
-    $lr=0.001
+    +actor_rollout_ref.actor.separate_advantages=True 
+
+#    +actor_rollout_ref.actor.seppo_big_noise=True \
+#    $sgd \
+#    $lr=0.001
 
 #switch-alg \
 #    $pure \
