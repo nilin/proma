@@ -78,7 +78,7 @@ switch-alg () {
 # pure means no clipping, i.e. reinforce and not ppo
 pure="actor_rollout_ref.actor.clip_ratio=1e9 actor_rollout_ref.actor.clip_ratio_high=1e9 actor_rollout_ref.actor.clip_ratio_low=1e9 actor_rollout_ref.actor.clip_ratio_c=1e9"
 
-test="trainer.val_before_train=False trainer.project_name=test-suppo"
+test="trainer.val_before_train=False trainer.project_name=test-suppo data.train_batch_size=16 actor_rollout_ref.actor.ppo_mini_batch_size=16"
 
 sgd="actor_rollout_ref.actor.optim.optimizer=SGD actor_rollout_ref.actor.optim.optimizer_impl=torch.optim actor_rollout_ref.actor.optim.lr=0.01"
 
@@ -91,6 +91,7 @@ switch-alg \
     trainer.experiment_name=seppo-seq \
     +actor_rollout_ref.actor.seppo_norm_power=0.0 \
     +actor_rollout_ref.actor.seppo_noise_power=1.0 \
+    +actor_rollout_ref.actor.seppo_overlap_power=0.0 \
     +actor_rollout_ref.actor.seppo_big_noise=True \
     +actor_rollout_ref.actor.separate_advantages=True \
     $sgd \
