@@ -187,7 +187,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                         grad += scaling * seq_grad 
 
-                        if noise == 0.0 and advantage != 0.0 and "debug_0" not in self.done_tests:
+                        if noise == 0.0 and advantage != 0.0:
                             self.done_tests.add("debug_0")
                             self.dump_tensors({
                                 f"attention_mask": self.attention_mask,
@@ -201,6 +201,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 f"scaling_{i}": scaling,
                                 f"grad_{i}": grad,
                             }, name=f"debug_0")
+                            raise ValueError(f"noise == 0.0 and advantage != 0.0 for {lname} {i}, likely indexing error")
 
                     if hasattr(mod, "suppo_grad"):
                         mod.suppo_grad += grad
@@ -416,7 +417,7 @@ class DataParallelPPOActor(BasePPOActor):
         res = []
         unflat_x = self.unflatten_attention_mask(flat_x, attention_mask)
         for row, a in zip(unflat_x, attention_mask):
-            res.append(row[a])
+            res.append(row[a.bool()])
         return res
 
     #########################################################
