@@ -165,8 +165,17 @@ class DataParallelPPOActor(BasePPOActor):
                     g_out = g_out[0]
 
                 if self.seppo_sequence:
+
+                    # for overlap computation against a fixed set of samples
+                    overall_noise = torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)
+                    _, topk_idx = torch.topk(overall_noise.flatten(), k=250)
+                    a0 = act_in[topk_idx]
+                    g0 = g_out[topk_idx]
+                    print(f"a0.shape: {a0.shape}, g0.shape: {g0.shape}")
+
                     act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
                     g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
+
                     grad = 0.0
                     for i, (act_in_seq, g_out_seq, advantage) in enumerate(zip(act_in_seqs, g_out_seqs, self.seq_advantages)):
                         seq_grad = g_out_seq.T @ act_in_seq
@@ -179,7 +188,7 @@ class DataParallelPPOActor(BasePPOActor):
                         else:
                             noise = torch.norm(torch.norm(_a, dim=1) * torch.norm(_g, dim=1))
 
-                        overlap = torch.norm(torch.sum((_g @ seq_grad) * _a, dim=1)) / torch.norm(torch.norm(_a, dim=1) * torch.norm(_g, dim=1))
+                        overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1))
 
                         p,q,r = self.seppo_norm_power, self.seppo_noise_power, self.seppo_overlap_power
 
