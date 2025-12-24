@@ -92,6 +92,7 @@ switch-alg \
     +actor_rollout_ref.actor.seppo_norm_power=0.0 \
     +actor_rollout_ref.actor.seppo_noise_power=1.0 \
     +actor_rollout_ref.actor.seppo_big_noise=True \
+    +actor_rollout_ref.actor.separate_advantages=True \
     $sgd \
     $lr=0.001
 

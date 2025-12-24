@@ -118,13 +118,11 @@ class DataParallelPPOActor(BasePPOActor):
             self.install_seppo_hooks()
             self.reset_seppo_stats()
 
+            self.include_advantages_in_loss = not self.config.get("separate_advantages", False)
+
         print(f"self.actor_optimizer: {self.actor_optimizer}")
-        try:
-            import torch.optim as optim
-            is_sgd = isinstance(self.actor_optimizer, optim.SGD) or self.actor_optimizer.__class__.__name__.lower() == "sgd"
-            print(f"is_sgd: {is_sgd}")
-        except Exception:
-            pass
+        #import torch.optim as optim
+        #is_sgd = isinstance(self.actor_optimizer, optim.SGD) or self.actor_optimizer.__class__.__name__.lower() == "sgd"
 
         self.done_tests = set()
 
@@ -169,7 +167,7 @@ class DataParallelPPOActor(BasePPOActor):
                     act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
                     g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
                     grad = 0.0
-                    for act_in_seq, g_out_seq, advantage in zip(act_in_seqs, g_out_seqs, self.seq_advantages):
+                    for i, (act_in_seq, g_out_seq, advantage) in enumerate(zip(act_in_seqs, g_out_seqs, self.seq_advantages)):
                         seq_grad = g_out_seq.T @ act_in_seq
 
                         _g = g_out_seq - torch.mean(g_out_seq, dim=0, keepdim=True)
@@ -181,8 +179,28 @@ class DataParallelPPOActor(BasePPOActor):
                             noise = torch.norm(_a)*torch.norm(_g)
 
                         p,q = self.seppo_norm_power, self.seppo_noise_power
-                        scaling = abs(advantage).pow(p+q) / (torch.norm(seq_grad).pow(p)*noise.pow(q) + 1e-8)
+
+                        if self.include_advantages_in_loss:
+                            scaling = abs(advantage).pow(p+q) / (torch.norm(seq_grad).pow(p)*noise.pow(q) + 1e-8)
+                        else:
+                            scaling = advantage / (torch.norm(seq_grad).pow(p)*noise.pow(q) + 1e-8)
+
                         grad += scaling * seq_grad 
+
+                        if noise == 0.0 and advantage != 0.0 and "debug_0" not in self.done_tests:
+                            self.done_tests.add("debug_0")
+                            self.dump_tensors({
+                                f"attention_mask": self.attention_mask,
+                                f"act_in": act_in,
+                                f"g_out": g_out,
+                                f"act_in_seq_{i}": act_in_seq,
+                                f"g_out_seq_{i}": g_out_seq,
+                                f"advantage_{i}": advantage,
+                                f"seq_grad_{i}": seq_grad,
+                                f"noise_{i}": noise,
+                                f"scaling_{i}": scaling,
+                                f"grad_{i}": grad,
+                            }, name=f"debug_0")
 
                     if hasattr(mod, "suppo_grad"):
                         mod.suppo_grad += grad
@@ -205,7 +223,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                     if dump:
                         print(f"dumping tensors for {lname}")
-                        self.dump_tensors(**{
+                        self.dump_tensors({
                             f"act_in_{lname}": act_in,
                             f"g_out_{lname}": g_out,
                             f"a_proj_{lname}": mod.a_proj,
@@ -337,12 +355,14 @@ class DataParallelPPOActor(BasePPOActor):
             self.ema[name] = self.ema[name] * ema_decay + value * (1 - ema_decay)
         return self.ema[name]
 
-    def dump_tensors(self, **tensors):
+    def dump_tensors(self, tensors, name="data"):
         import numpy as np
-        os.makedirs("dump", exist_ok=True)
+        from datetime import datetime
+        id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        os.makedirs(f"dump/{name}_{id}", exist_ok=True)
         for key, value in tensors.items():
             arr = value.detach().cpu().float().numpy()
-            np.save(f"dump/{key}.npy", arr)
+            np.save(f"dump/{name}_{id}/{key}.npy", arr)
 
     #########################################################
     # seqwise seppo
@@ -359,16 +379,12 @@ class DataParallelPPOActor(BasePPOActor):
         unflat_x = self.unflatten_attention_mask(flat_x, attention_mask)
         unflat_x_list = self.unflatten_attention_mask_list(flat_x, attention_mask)
 
-        import pandas as pd
-        import numpy as np
-        id = np.random.randint(0, 1000000)
-
-        self.dump_tensors(**{
-            f"attention_mask_{id}": attention_mask,
-            f"x_{id}": x,
-            f"flat_x_{id}": flat_x,
-            f"unflat_x_{id}": unflat_x,
-        })
+        self.dump_tensors({
+            f"attention_mask": attention_mask,
+            f"x": x,
+            f"flat_x": flat_x,
+            f"unflat_x": unflat_x,
+        }, name="test_flatten_unflatten")
 
         assert torch.allclose(x, unflat_x)
         for a, x, y in zip(attention_mask, x, unflat_x_list):
@@ -805,7 +821,7 @@ class DataParallelPPOActor(BasePPOActor):
                     pg_loss, pg_metrics = policy_loss_fn(
                         old_log_prob=old_log_prob,
                         log_prob=log_prob,
-                        advantages=advantages,
+                        advantages=advantages if self.include_advantages_in_loss else torch.ones_like(advantages),
                         response_mask=response_mask,
                         loss_agg_mode=loss_agg_mode,
                         config=self.config,
