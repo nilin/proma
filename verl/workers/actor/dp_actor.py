@@ -841,9 +841,9 @@ class DataParallelPPOActor(BasePPOActor):
 
                     if self.override_pg_loss:
                         if self.include_advantages_in_loss:
-                            pg_loss = agg_loss(loss_mat=log_prob*advantages, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                            pg_loss = agg_loss(loss_mat=-log_prob*advantages, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
                         else:
-                            pg_loss = agg_loss(loss_mat=log_prob, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                            pg_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
                     else:
                         # Compute policy loss (any function is expected to return 2 values)
                         pg_loss, pg_metrics = policy_loss_fn(
