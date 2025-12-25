@@ -109,6 +109,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_overlap_power = self.config.get("seppo_overlap_power", 0.0)
         self.seppo_big_noise = self.config.get("seppo_big_noise", False)
         self.override_pg_loss = self.config.get("override_pg_loss", False)
+        self.seppo_overlap_largest = self.config.get("seppo_overlap_largest", True)
 
         if self.seppo:
             assert self.seppo_mode in ["parameter", "sequence", "both"], "seppo_mode must be either parameter or sequence or both"
@@ -175,7 +176,9 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # for overlap computation against a fixed set of samples
                     overall_noise = torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)
-                    _, topk_idx = torch.topk(overall_noise.flatten(), k=250)
+
+                    _, topk_idx = torch.topk(overall_noise.flatten(), k=250, largest=self.seppo_overlap_largest)
+
                     a0 = act_in[topk_idx]
                     g0 = g_out[topk_idx]
                     print(f"a0.shape: {a0.shape}, g0.shape: {g0.shape}")
