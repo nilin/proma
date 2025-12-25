@@ -86,12 +86,13 @@ lr=actor_rollout_ref.actor.optim.lr
 
 switch-alg \
     $pure \
+    actor_rollout_ref.actor.grad_clip=1e9 \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=sequence \
     trainer.experiment_name=seppo-seq \
     +actor_rollout_ref.actor.seppo_norm_power=0.0 \
-    +actor_rollout_ref.actor.seppo_noise_power=1.0 \
-    +actor_rollout_ref.actor.seppo_overlap_power=0.0 
+    +actor_rollout_ref.actor.seppo_noise_power=0.0 \
+    +actor_rollout_ref.actor.seppo_overlap_power=1.0 
 
 #    +actor_rollout_ref.actor.seppo_big_noise=True \
 #    $sgd \
