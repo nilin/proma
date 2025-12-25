@@ -161,6 +161,9 @@ class DataParallelPPOActor(BasePPOActor):
                 _g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
                 g_out = _g_out.clone()
 
+                act_in = act_in.to(dtype=torch.float32)
+                g_out = g_out.to(dtype=torch.float32)
+
                 # Explicitly remove a leading singleton (e.g., [1, T, D] -> [T, D])
                 if act_in.dim() >= 3 and act_in.size(0) == 1:
                     act_in = act_in[0]
