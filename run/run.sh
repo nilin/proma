@@ -87,10 +87,11 @@ switch-alg \
     $pure \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=sequence \
-    trainer.experiment_name=seppo-seq \
+    trainer.experiment_name=seppo-seq-overlap-override \
     +actor_rollout_ref.actor.seppo_norm_power=0.0 \
     +actor_rollout_ref.actor.seppo_noise_power=0.0 \
-    +actor_rollout_ref.actor.seppo_overlap_power=1.0 
+    +actor_rollout_ref.actor.seppo_overlap_power=1.0 \
+    +actor_rollout_ref.actor.override_pg_loss=True 
 
 bash run/next.sh
 
