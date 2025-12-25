@@ -119,7 +119,10 @@ class DataParallelPPOActor(BasePPOActor):
             self.install_seppo_hooks()
             self.reset_seppo_stats()
 
-            self.include_advantages_in_loss = not self.config.get("separate_advantages", False)
+        if self.seppo and self.seppo_sequence:
+            self.include_advantages_in_loss = False
+        else:
+            self.include_advantages_in_loss = True
 
         print(f"self.actor_optimizer: {self.actor_optimizer}")
         #import torch.optim as optim

@@ -91,8 +91,7 @@ switch-alg \
     trainer.experiment_name=seppo-seq \
     +actor_rollout_ref.actor.seppo_norm_power=0.0 \
     +actor_rollout_ref.actor.seppo_noise_power=1.0 \
-    +actor_rollout_ref.actor.seppo_overlap_power=0.0 \
-    +actor_rollout_ref.actor.separate_advantages=True 
+    +actor_rollout_ref.actor.seppo_overlap_power=0.0 
 
 #    +actor_rollout_ref.actor.seppo_big_noise=True \
 #    $sgd \
