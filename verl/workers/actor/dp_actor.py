@@ -177,7 +177,13 @@ class DataParallelPPOActor(BasePPOActor):
                     # for overlap computation against a fixed set of samples
                     overall_noise = torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)
 
-                    _, topk_idx = torch.topk(overall_noise.flatten(), k=250, largest=self.seppo_overlap_largest)
+                    if self.seppo_overlap_largest:
+                        _, topk_idx = torch.topk(overall_noise.flatten(), k=250)
+                    else:
+                        # get the smallest but not 0s
+                        tmp = overall_noise.flatten().clone()
+                        tmp[tmp == 0] = 1e12
+                        _, topk_idx = torch.topk(tmp, k=250, largest=False)
 
                     a0 = act_in[topk_idx]
                     g0 = g_out[topk_idx]
