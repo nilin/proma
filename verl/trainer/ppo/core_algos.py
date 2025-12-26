@@ -799,8 +799,9 @@ def agg_loss(loss_mat: torch.Tensor, loss_mask: torch.Tensor, loss_agg_mode: str
         # Per-sequence: token-sum divided by sqrt(token_count); then average across sequences
         seq_mask = torch.sum(loss_mask, dim=-1)  # per-sequence token count
         seq_losses = torch.sum(loss_mat * loss_mask, dim=-1) / (torch.sqrt(seq_mask + 1e-8) + 1e-8)  # token-mean
+        seq_losses_1 = torch.sum(loss_mask, dim=-1) / (torch.sqrt(seq_mask + 1e-8) + 1e-8)  # token-mean
         seq_mask = (seq_mask > 0).float()  # exclude fully masked sequences
-        loss = verl_F.masked_mean(seq_losses, seq_mask)  # seq-mean
+        loss = verl_F.masked_mean(seq_losses, seq_mask) / verl_F.masked_mean(seq_losses_1, seq_mask) # seq-mean
     elif loss_agg_mode == "seq-mean-token-sum-norm":
         seq_losses = torch.sum(loss_mat * loss_mask, dim=-1)
         loss = torch.sum(seq_losses) / loss_mask.shape[-1]  # The divisor
