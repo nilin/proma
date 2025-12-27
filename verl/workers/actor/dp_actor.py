@@ -213,7 +213,7 @@ class DataParallelPPOActor(BasePPOActor):
                         D, U = torch.linalg.eigh(ntk)
                         reg = self.seppo_nat_reg*torch.mean(D)
                         preconditioner = reg / (D + reg + 1e-8)
-                        advantages_preconditioned = U @ (preconditioner * (U.T @ self.advantages))
+                        advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
 
                         grad = torch.stack(seq_grads, dim=-1) @ advantages_preconditioned
                         print("using nat")
