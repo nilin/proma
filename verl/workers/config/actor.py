@@ -131,6 +131,8 @@ class ActorConfig(BaseConfig):
     seppo_overlap_largest: bool = True
     seppo_norm_pos_power: float = 1.0
     seppo_overlap_random: bool = False
+    seppo_nat: bool = False
+    seppo_nat_reg: float = 1.0
     override_pg_loss: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False
