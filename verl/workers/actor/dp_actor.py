@@ -209,7 +209,7 @@ class DataParallelPPOActor(BasePPOActor):
                         else:
                             noise = torch.norm(torch.norm(_a, dim=1) * torch.norm(_g, dim=1))
 
-                        overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1))
+                        overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
 
                         p,q,r = self.seppo_norm_power, self.seppo_noise_power, self.seppo_overlap_power
                         pp = self.seppo_norm_pos_power
