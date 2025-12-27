@@ -211,7 +211,8 @@ class DataParallelPPOActor(BasePPOActor):
                                 ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
                                 ntk[j, i] = ntk[i, j]
                         D, U = torch.linalg.eigh(ntk)
-                        preconditioner = 1.0 / (D + self.seppo_nat_reg*torch.mean(D) + 1e-8)
+                        reg = self.seppo_nat_reg*torch.mean(D)
+                        preconditioner = reg / (D + reg + 1e-8)
                         advantages_preconditioned = U @ (preconditioner * (U.T @ self.advantages))
 
                         grad = torch.stack(seq_grads, dim=-1) @ advantages_preconditioned
