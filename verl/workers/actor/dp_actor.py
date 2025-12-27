@@ -193,7 +193,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                     a0 = act_in[topk_idx]
                     g0 = g_out[topk_idx]
-                    print(f"a0.shape: {a0.shape}, g0.shape: {g0.shape}")
+                    #print(f"a0.shape: {a0.shape}, g0.shape: {g0.shape}")
 
                     act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
                     g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
@@ -219,7 +219,7 @@ class DataParallelPPOActor(BasePPOActor):
                             raise ValueError("seppo to be used with separate_advantages")
                         else:
                             rescaling = torch.norm(seq_grad).pow(pp) / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
-                            print(f"rescaling: {rescaling}")
+                            #print(f"rescaling: {rescaling}")
                             scaling = rescaling * advantage
 
                         grad += scaling * seq_grad 
