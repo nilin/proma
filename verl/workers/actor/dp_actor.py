@@ -110,6 +110,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_big_noise = self.config.get("seppo_big_noise", False)
         self.override_pg_loss = self.config.get("override_pg_loss", False)
         self.seppo_overlap_largest = self.config.get("seppo_overlap_largest", True)
+        self.seppo_norm_pos_power = self.config.get("seppo_norm_pos_power", 1.0)
+        self.seppo_overlap_random = self.config.get("seppo_overlap_random", False)
 
         if self.seppo:
             assert self.seppo_mode in ["parameter", "sequence", "both"], "seppo_mode must be either parameter or sequence or both"
@@ -177,7 +179,10 @@ class DataParallelPPOActor(BasePPOActor):
                     # for overlap computation against a fixed set of samples
                     overall_noise = torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)
 
-                    if self.seppo_overlap_largest:
+                    if self.seppo_overlap_random:
+                        perm = torch.randperm(overall_noise.numel(), device=overall_noise.device)
+                        topk_idx = perm[:250]
+                    elif self.seppo_overlap_largest:
                         _, topk_idx = torch.topk(overall_noise.flatten(), k=250)
                     else:
                         # get the smallest but not 0s
@@ -207,11 +212,12 @@ class DataParallelPPOActor(BasePPOActor):
                         overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1))
 
                         p,q,r = self.seppo_norm_power, self.seppo_noise_power, self.seppo_overlap_power
+                        pp = self.seppo_norm_pos_power
 
                         if self.include_advantages_in_loss:
-                            scaling = abs(advantage).pow(p+q+2*r) / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
+                            raise ValueError("seppo to be used with separate_advantages")
                         else:
-                            rescaling = 1.0 / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
+                            rescaling = torch.norm(seq_grad).pow(pp) / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
                             print(f"rescaling: {rescaling}")
                             scaling = rescaling * advantage
 

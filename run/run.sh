@@ -88,12 +88,29 @@ switch-alg \
     trainer.total_training_steps=102 \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=sequence \
-    trainer.experiment_name=seppo-seq-overlap-override \
+    trainer.experiment_name=seppo-seq-norm+1-overlap-2-override \
     +actor_rollout_ref.actor.seppo_norm_power=0.0 \
     +actor_rollout_ref.actor.seppo_noise_power=0.0 \
-    +actor_rollout_ref.actor.seppo_overlap_power=1.0 \
-    +actor_rollout_ref.actor.override_pg_loss=False \
-    +actor_rollout_ref.actor.seppo_overlap_largest=True
+    +actor_rollout_ref.actor.seppo_overlap_power=2.0 \
+    +actor_rollout_ref.actor.seppo_norm_pos_power=1.0 \
+    +actor_rollout_ref.actor.override_pg_loss=True \
+    +actor_rollout_ref.actor.seppo_overlap_largest=False \
+    +actor_rollout_ref.actor.seppo_overlap_random=True \
+
+switch-alg \
+    $pure \
+    trainer.total_training_steps=102 \
+    +actor_rollout_ref.actor.use_seppo=True \
+    +actor_rollout_ref.actor.seppo_mode=sequence \
+    trainer.experiment_name=seppo-seq-norm+2-overlap-2-sqrtlen-override \
+    +actor_rollout_ref.actor.seppo_norm_power=0.0 \
+    +actor_rollout_ref.actor.seppo_noise_power=0.0 \
+    +actor_rollout_ref.actor.seppo_overlap_power=2.0 \
+    +actor_rollout_ref.actor.seppo_norm_pos_power=2.0 \
+    +actor_rollout_ref.actor.override_pg_loss=True \
+    +actor_rollout_ref.actor.seppo_overlap_largest=False \
+    +actor_rollout_ref.actor.seppo_overlap_random=True \
+    actor_rollout_ref.actor.loss_agg_mode=seq-mean-token-sum-sqrtlen
 
 bash run/next.sh
 
