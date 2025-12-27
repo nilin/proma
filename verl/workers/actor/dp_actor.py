@@ -185,10 +185,11 @@ class DataParallelPPOActor(BasePPOActor):
                     elif self.seppo_overlap_largest:
                         _, topk_idx = torch.topk(overall_noise.flatten(), k=250)
                     else:
-                        # get the smallest but not 0s
-                        tmp = overall_noise.flatten().clone()
-                        tmp[tmp == 0] = 1e12
-                        _, topk_idx = torch.topk(tmp, k=250, largest=False)
+                        raise ValueError("seppo_overlap_smallest not recommended")
+                        # # get the smallest but not 0s
+                        # tmp = overall_noise.flatten().clone()
+                        # tmp[tmp == 0] = 1e12
+                        # _, topk_idx = torch.topk(tmp, k=250, largest=False)
 
                     a0 = act_in[topk_idx]
                     g0 = g_out[topk_idx]
