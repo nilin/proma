@@ -104,14 +104,19 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
         self.seppo_adjustment_threshold = self.config.get("seppo_adjustment_threshold", 0.2)
         self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
-        self.seppo_norm_power = self.config.get("seppo_norm_power", 0.0)
-        self.seppo_noise_power = self.config.get("seppo_noise_power", 1.0)
-        self.seppo_overlap_power = self.config.get("seppo_overlap_power", 0.0)
+
+        self.seppo_norm_pos_power = self.config.get("seppo_norm_pos_power", 0.0)
+        self.seppo_norm_neg_power = self.config.get("seppo_norm_neg_power", 0.0)
+        self.seppo_noise_neg_power = self.config.get("seppo_noise_neg_power", 0.0)
+        self.seppo_overlap_neg_power = self.config.get("seppo_overlap_neg_power", 0.0)
+        self.seppo_rel_overlap_neg_power = self.config.get("seppo_rel_overlap_neg_power", 0.0)
+        self.seppo_rel_overlap_reg = self.config.get("seppo_rel_overlap_reg", 1.0)
+
         self.seppo_big_noise = self.config.get("seppo_big_noise", False)
         self.override_pg_loss = self.config.get("override_pg_loss", False)
-        self.seppo_overlap_largest = self.config.get("seppo_overlap_largest", True)
-        self.seppo_norm_pos_power = self.config.get("seppo_norm_pos_power", 1.0)
-        self.seppo_overlap_random = self.config.get("seppo_overlap_random", False)
+        self.seppo_overlap_largest = self.config.get("seppo_overlap_largest", False)
+        self.seppo_overlap_random = self.config.get("seppo_overlap_random", True)
+
         self.seppo_nat = self.config.get("seppo_nat", False)
         self.seppo_nat_reg = self.config.get("seppo_nat_reg", 1.0)
 
@@ -123,7 +128,7 @@ class DataParallelPPOActor(BasePPOActor):
             print(f"self.seppo_sequence: {self.seppo_sequence}")
 
             self.install_seppo_hooks()
-            self.reset_seppo_stats()
+            self.reset_seppo_cache()
 
         if self.seppo and self.seppo_sequence:
             self.include_advantages_in_loss = False
@@ -211,7 +216,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
                                 ntk[j, i] = ntk[i, j]
                         D, U = torch.linalg.eigh(ntk)
-                        reg = self.seppo_nat_reg*torch.mean(D)
+                        reg = self.seppo_nat_reg * self.batch_stats(f"seppo_nat_reg_{lname}", torch.mean(D))
                         preconditioner = reg / (D + reg + 1e-8)
                         advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
 
@@ -233,13 +238,18 @@ class DataParallelPPOActor(BasePPOActor):
 
                             overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
 
-                            p,q,r = self.seppo_norm_power, self.seppo_noise_power, self.seppo_overlap_power
+                            overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
+
+                            p,q,r = self.seppo_norm_neg_power, self.seppo_noise_neg_power, self.seppo_overlap_neg_power
                             pp = self.seppo_norm_pos_power
 
                             if self.include_advantages_in_loss:
                                 raise ValueError("seppo to be used with separate_advantages")
                             else:
                                 rescaling = torch.norm(seq_grad).pow(pp) / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
+
+                                reg = self.seppo_rel_overlap_reg * self.batch_stats(f"seppo_rel_overlap_reg_{lname}", overlap_over_norm)
+                                rescaling = rescaling * reg / (overlap_over_norm + reg + 1e-8).pow(self.seppo_rel_overlap_neg_power)
                                 #print(f"rescaling: {rescaling}")
                                 scaling = rescaling * advantage
 
@@ -299,6 +309,36 @@ class DataParallelPPOActor(BasePPOActor):
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(_bwd_hook)
 
+    def batch_stats(self, name: str, value: torch.Tensor, ema_decay: float = 0.9) -> torch.Tensor:
+        if not hasattr(self, "done_batch_stats"):
+            self.done_batch_stats = {}
+        if not hasattr(self, "current_batch_stats"):
+            self.current_batch_stats = {}
+
+        if name not in self.current_batch_stats:
+            self.current_batch_stats[name] = []
+
+        self.current_batch_stats[name].append(value)
+        
+        if name in self.done_batch_stats:
+            return self.list_ema(self.done_batch_stats[name], ema_decay)
+        else:
+            print(f"no batch history for {name}, returning value {value}")
+            return value
+
+    def list_ema(self, values: list[torch.Tensor], ema_decay: float = 0.9) -> torch.Tensor:
+        res = values[0]
+        for value in values[1:]:
+            res = res * ema_decay + value * (1 - ema_decay)
+        return res
+
+    def update_batch_stats(self):
+        for name, values in self.current_batch_stats.items():
+            if name not in self.done_batch_stats:
+                self.done_batch_stats[name] = []
+            self.done_batch_stats[name].append(torch.mean(torch.stack(values)))
+            self.current_batch_stats[name].clear()
+
     def right_singular_rows(self, A: torch.Tensor, k: int, iterations: int = 3, skip_svd: bool = False) -> torch.Tensor:
         A = A.to(dtype=torch.float32)
         n, d = A.shape
@@ -317,7 +357,7 @@ class DataParallelPPOActor(BasePPOActor):
             _, S, V = torch.linalg.svd(Q.T @ A, full_matrices=False)
             return S, V
 
-    def reset_seppo_stats(self):
+    def reset_seppo_cache(self):
         for lname, lmod in self.linear_modules.items():
             try:
                 lmod.a_proj.clear()
@@ -479,7 +519,6 @@ class DataParallelPPOActor(BasePPOActor):
         return res
 
     #########################################################
-
 
     def _forward_micro_batch(
         self, micro_batch, temperature, calculate_entropy=False
@@ -1020,11 +1059,13 @@ class DataParallelPPOActor(BasePPOActor):
                             with torch.no_grad():
                                 g_local.copy_(grad_transformed)
 
-                    self.reset_seppo_stats()
+                    self.reset_seppo_cache()
                 ################################################################################
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, mini_batch_metrics)
+
+                self.update_batch_stats()
         self.actor_optimizer.zero_grad()
         return metrics
