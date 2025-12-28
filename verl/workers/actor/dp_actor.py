@@ -91,49 +91,25 @@ class DataParallelPPOActor(BasePPOActor):
         #########################################################
 
         self.seppo = self.config.get("use_seppo", False)
-        self.seppo_mode = self.config.get("seppo_mode", None)
         self.testing = self.config.get("seppo_testing", False)
-        self.seppo_static_fraction = self.config.get("seppo_static_fraction", 0.5)
-        self.seppo_dim = self.config.get("seppo_dim", 32)
-        self.projection_dim_margin = 8
-        self.random_projection_dim = self.seppo_dim + self.projection_dim_margin
-        self.seppo_ema_decay = self.config.get("seppo_ema_decay", 0.8)
-        self.seppo_min_preconditioner = self.config.get("seppo_min_preconditioner", 0.2)
-        self.seppo_linear_interpolation = self.config.get("seppo_linear_interpolation", False)
-        self.seppo_squared = self.config.get("seppo_squared", False)
-        self.seppo_len_lim = self.config.get("seppo_len_lim", 6000)
-        self.seppo_adjustment_threshold = self.config.get("seppo_adjustment_threshold", 0.2)
-        self.seppo_skip_rank_1 = self.config.get("seppo_skip_rank_1", False)
 
         self.seppo_norm_pos_power = self.config.get("seppo_norm_pos_power", 0.0)
         self.seppo_norm_neg_power = self.config.get("seppo_norm_neg_power", 0.0)
-        self.seppo_noise_neg_power = self.config.get("seppo_noise_neg_power", 0.0)
         self.seppo_overlap_neg_power = self.config.get("seppo_overlap_neg_power", 0.0)
         self.seppo_rel_overlap_neg_power = self.config.get("seppo_rel_overlap_neg_power", 0.0)
 
         self.seppo_rel_overlap_reg = self.config.get("seppo_rel_overlap_reg", 1.0)
         self.seppo_overlap_reg = self.config.get("seppo_overlap_reg", 1.0)
         self.seppo_norm_reg = self.config.get("seppo_norm_reg", 1.0)
-
-        self.seppo_big_noise = self.config.get("seppo_big_noise", False)
-        self.override_pg_loss = self.config.get("override_pg_loss", False)
-        self.seppo_overlap_largest = self.config.get("seppo_overlap_largest", False)
-        self.seppo_overlap_random = self.config.get("seppo_overlap_random", True)
-
-        self.seppo_nat = self.config.get("seppo_nat", False)
         self.seppo_nat_reg = self.config.get("seppo_nat_reg", 1.0)
 
-        if self.seppo:
-            assert self.seppo_mode in ["parameter", "sequence", "both"], "seppo_mode must be either parameter or sequence or both"
-            self.seppo_parameter = self.seppo_mode in ["parameter", "both"]
-            self.seppo_sequence = self.seppo_mode in ["sequence", "both"]
-            print(f"self.seppo_parameter: {self.seppo_parameter}")
-            print(f"self.seppo_sequence: {self.seppo_sequence}")
+        self.override_pg_loss = self.config.get("override_pg_loss", False)
 
+        self.seppo_nat = self.config.get("seppo_nat", False)
+
+        if self.seppo:
             self.install_seppo_hooks()
             self.reset_seppo_cache()
-
-        if self.seppo and self.seppo_sequence:
             self.include_advantages_in_loss = False
         else:
             self.include_advantages_in_loss = True
@@ -184,26 +160,12 @@ class DataParallelPPOActor(BasePPOActor):
                 if g_out.dim() >= 3 and g_out.size(0) == 1:
                     g_out = g_out[0]
 
-                if self.seppo_sequence:
-
+                if True:
                     # for overlap computation against a fixed set of samples
-                    overall_noise = torch.norm(act_in, dim=1) * torch.norm(g_out, dim=1)
-
-                    if self.seppo_overlap_random:
-                        perm = torch.randperm(overall_noise.numel(), device=overall_noise.device)
-                        topk_idx = perm[:250]
-                    elif self.seppo_overlap_largest:
-                        _, topk_idx = torch.topk(overall_noise.flatten(), k=250)
-                    else:
-                        raise ValueError("seppo_overlap_smallest not recommended")
-                        # # get the smallest but not 0s
-                        # tmp = overall_noise.flatten().clone()
-                        # tmp[tmp == 0] = 1e12
-                        # _, topk_idx = torch.topk(tmp, k=250, largest=False)
-
+                    perm = torch.randperm(act_in.shape[0], device=act_in.device)
+                    topk_idx = perm[:250]
                     a0 = act_in[topk_idx]
                     g0 = g_out[topk_idx]
-                    #print(f"a0.shape: {a0.shape}, g0.shape: {g0.shape}")
 
                     act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
                     g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
@@ -224,7 +186,6 @@ class DataParallelPPOActor(BasePPOActor):
                         advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
 
                         grad = torch.stack(seq_grads, dim=-1) @ advantages_preconditioned
-                        #print("using nat")
 
                     else:
                         grad = 0.0
@@ -261,30 +222,6 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         mod.suppo_grad = grad
 
-                if self.seppo_parameter:
-                    non0 = self.mcb_advantages != 0
-                    act_in[non0] = act_in[non0] / self.mcb_advantages[non0,None].to(device=act_in.device, dtype=act_in.dtype)
-                    g_out[non0] = g_out[non0] / self.mcb_advantages[non0,None].to(device=g_out.device, dtype=g_out.dtype)
-
-                    g_out = g_out / self.loss_scale_factor
-
-                    if act_in.shape[-1] > self.seppo_len_lim:
-                        print(f"not registering seppo for {lname} because act_in.shape[-1] > {self.seppo_len_lim}")
-                        return
-
-                    mod.a_proj.append(self.right_singular_rows(act_in, self.seppo_dim, skip_svd=True))
-                    mod.g_proj.append(self.right_singular_rows(g_out, self.seppo_dim, skip_svd=True))
-
-                    if dump:
-                        print(f"dumping tensors for {lname}")
-                        self.dump_tensors({
-                            f"act_in_{lname}": act_in,
-                            f"g_out_{lname}": g_out,
-                            f"a_proj_{lname}": mod.a_proj,
-                            f"g_proj_{lname}": mod.g_proj,
-                            f"projection_block_{lname}": self.projection_block,
-                            f"mcb_advantages": self.mcb_advantages,
-                            })
 
             if self.testing and i in [8,16,32,64,128]:
                 lmod.register_forward_hook(_fwd_hook)
@@ -322,24 +259,6 @@ class DataParallelPPOActor(BasePPOActor):
                 self.done_batch_stats[name] = []
             self.done_batch_stats[name].append(torch.mean(torch.stack(values)))
             self.current_batch_stats[name].clear()
-
-    def right_singular_rows(self, A: torch.Tensor, k: int, iterations: int = 3, skip_svd: bool = False) -> torch.Tensor:
-        A = A.to(dtype=torch.float32)
-        n, d = A.shape
-        k_ = k+self.projection_dim_margin
-        N = torch.randn(d, k_, device=A.device, dtype=A.dtype)
-        Y = A @ N
-        for _ in range(iterations-1):
-            N = A.T @ Y
-            Y = A @ N
-            
-        Q, R = torch.linalg.qr(Y)
-
-        if skip_svd:
-            return Q.T @ A
-        else:
-            _, S, V = torch.linalg.svd(Q.T @ A, full_matrices=False)
-            return S, V
 
     def reset_seppo_cache(self):
         for lname, lmod in self.linear_modules.items():
@@ -413,31 +332,6 @@ class DataParallelPPOActor(BasePPOActor):
 
         return tuple(slices)
 
-    def get_random_projections(self, micro_batches):
-        # Each element in micro_batches is a DataProto. Access tensors via .batch
-        # rather than string-indexing the DataProto itself.
-        mb_sizes = []
-
-        for micro_batch in micro_batches:
-            model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
-            mb_sizes.append(int(model_inputs["attention_mask"].sum()))
-
-        n_samples = sum(mb_sizes)
-
-        rand = torch.randn(n_samples, self.random_projection_dim, device=self.device_name)
-        projection, S, _ = torch.linalg.svd(rand, full_matrices=False)
-
-        return projection.split(mb_sizes)
-
-    def get_ema(self, name, value, ema_decay):
-        if not hasattr(self, "ema"):
-            self.ema = {}
-        if name not in self.ema:
-            self.ema[name] = value
-        else:
-            self.ema[name] = self.ema[name] * ema_decay + value * (1 - ema_decay)
-        return self.ema[name]
-
     def dump_tensors(self, tensors, name="data"):
         import numpy as np
         from datetime import datetime
@@ -475,16 +369,6 @@ class DataParallelPPOActor(BasePPOActor):
 
         print("flatten and unflatten test passed")
         return unflat_x
-
-    #def unflatten_attention_mask(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-    #    res = torch.zeros(attention_mask.shape[:2]+flat_x.shape[1:], device=attention_mask.device, dtype=flat_x.dtype)
-    #    #res.masked_scatter_(attention_mask.bool(), flat_x)
-    #    start = 0
-    #    for i in range(attention_mask.shape[0]):
-    #        end = start + attention_mask[i].sum()
-    #        res[i, attention_mask[i]] = flat_x[start:end]
-    #        start = end
-    #    return res
 
     def unflatten_attention_mask(self, x_flat, attention_mask):
         B, R = attention_mask.shape[:2]
@@ -828,12 +712,6 @@ class DataParallelPPOActor(BasePPOActor):
 
                 self.actor_optimizer.zero_grad()
 
-                #################################################################################
-                ### SEPPO SEQUENCE MODE: Precompute grad norms
-                #if self.seppo and self.seppo_sequence:
-                #    self.precompute_mcb_norms2(micro_batches, temperature, on_policy)
-                #################################################################################
-
                 for mcb_idx, micro_batch in enumerate(micro_batches):
                     self.projection_block = self.projections[mcb_idx]
                     micro_batch = micro_batch.to(get_device_id())
@@ -853,17 +731,9 @@ class DataParallelPPOActor(BasePPOActor):
 
                     ################################################################################
                     if self.seppo:
-                        self.test_flatten_unflatten(model_inputs["attention_mask"])
-                        ## SEPPO PARAMETER MODE
-                        attention_mask = model_inputs["attention_mask"]
-                        advantages_w_prompt = advantages[..., :1].expand_as(attention_mask) * attention_mask
-                        assert torch.allclose(advantages_w_prompt[:, -advantages.shape[1]:], advantages), advantages_w_prompt
-                        self.mcb_advantages = self.flatten_attention_mask(advantages_w_prompt, attention_mask)
-                        self.loss_scale_factor = loss_scale_factor
-
-                        ## SEPPO SEQUENCE MODE
+                        self.attention_mask = attention_mask = model_inputs["attention_mask"]
                         self.seq_advantages = advantages[:, 0].to(attention_mask.device)
-                        self.attention_mask = attention_mask
+                        self.test_flatten_unflatten(attention_mask)
                     ################################################################################
 
                     # all return: (bsz, response_length)
@@ -968,77 +838,9 @@ class DataParallelPPOActor(BasePPOActor):
                             g_local = dtg.to_local()
                             # Select matching per-row/col scalars and align dtype/device
 
-
-                            ################################################################################
-                            ## SEPPO PARAMETER MODE
-                            def precondition(grad, proj, mode="right", actual_mode=None):
-
-                                if grad.shape[-1] > self.seppo_len_lim:
-                                    print(f"skipping {actual_mode} seppo for {lname} with dim {grad.shape} because grad.shape[-1] > {self.seppo_len_lim}")
-                                    return grad
-
-                                if mode == "left":
-                                    return precondition(grad.T, proj, mode="right", actual_mode="left").T
-
-                                if actual_mode is None:
-                                    actual_mode = mode
-
-                                S, V = self.right_singular_rows(proj, self.seppo_dim)
-
-                                if self.seppo_linear_interpolation:
-                                    preconditioner = torch.ones_like(S)
-                                    preconditioner[:self.seppo_dim] = torch.linspace(self.seppo_min_preconditioner, 1.0, self.seppo_dim) 
-
-                                else:
-                                    if self.seppo_squared:
-                                        preconditioner = 1.0 / (S.pow(2) + 1e-8)
-                                    else:
-                                        preconditioner = 1.0 / (S + 1e-8)
-
-                                    scaling = 1.0 / preconditioner[self.seppo_dim-1]
-                                    scaling = torch.clamp(scaling, min=self.seppo_min_preconditioner / preconditioner[0])
-                                    scaling = self.get_ema(f"seppo_scaling_{lname}_{actual_mode}", scaling, self.seppo_ema_decay)
-                                    preconditioner = preconditioner * scaling
-                                    preconditioner = torch.clamp(preconditioner, 0.0, 1.0)
-
-                                    n_precondition = (preconditioner < 1.0).sum().item()
-                                    print(f"{lname}.{pname} preconditioner #<1.0: {n_precondition}")
-                                    print(f"first10: {[float(f'{x.item():.2g}') for x in preconditioner.flatten()[:10]]}")
-
-                                diag = preconditioner - 1.0
-
-                                grad_adjustment = ((grad @ V.T) * diag) @ V
-
-                                r = torch.norm(grad_adjustment) / torch.norm(grad)
-                                if r > self.seppo_adjustment_threshold:
-                                    adjustment_ratio = self.seppo_adjustment_threshold / r
-                                    print(f"adjustment ratio {adjustment_ratio:.2f}")
-                                    grad_adjustment = grad_adjustment * adjustment_ratio
-
-                                if self.seppo_skip_rank_1 and n_precondition == 1:
-                                    print(f"skipping seppo because n_precondition == 1")
-                                    print()
-                                    return grad
-
-                                print()
-                                return grad + grad_adjustment
-
-                            if self.seppo_sequence:
+                            if True:
                                 grad_transformed = 0.0 * g_local.clone() + lmod.suppo_grad
                                 lmod.suppo_grad = 0.0
-                            else:
-                                grad_transformed = g_local.clone()
-
-                            if self.seppo_parameter:
-                                if len(lmod.a_proj) > 0:
-                                    g_proj = torch.cat(lmod.g_proj, dim=0)
-                                    a_proj = torch.cat(lmod.a_proj, dim=0)
-                                    lmod.a_proj.clear()
-                                    lmod.g_proj.clear()
-                                    grad_transformed = precondition(grad_transformed, g_proj[:,sl[0]], mode="left")
-                                    grad_transformed = precondition(grad_transformed, a_proj[:,sl[1]], mode="right")
-                                else:
-                                    print(f"no a_proj for {lname}, skipping seppo")
 
                             with torch.no_grad():
                                 g_local.copy_(grad_transformed)
