@@ -834,12 +834,12 @@ class DataParallelPPOActor(BasePPOActor):
                                 g_local.copy_(grad_transformed)
 
                     self.reset_seppo_cache()
+                    self.update_batch_stats()
                 ################################################################################
 
                 grad_norm = self._optimizer_step()
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, mini_batch_metrics)
 
-                self.update_batch_stats()
         self.actor_optimizer.zero_grad()
         return metrics
