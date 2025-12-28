@@ -758,23 +758,24 @@ class DataParallelPPOActor(BasePPOActor):
                     # clip_cov -> verl.trainer.ppo.core_algos.compute_policy_loss_clip_cov
                     policy_loss_fn = get_policy_loss_fn(loss_mode)
 
-                    if self.override_pg_loss:
-                        if self.include_advantages_in_loss:
-                            pg_loss = agg_loss(loss_mat=-log_prob*advantages, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
-                        else:
-                            pg_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
-                    else:
-                        # Compute policy loss (any function is expected to return 2 values)
-                        pg_loss, pg_metrics = policy_loss_fn(
-                            old_log_prob=old_log_prob,
-                            log_prob=log_prob,
-                            advantages=advantages if self.include_advantages_in_loss else torch.ones_like(advantages),
-                            response_mask=response_mask,
-                            loss_agg_mode=loss_agg_mode,
-                            config=self.config,
-                            rollout_is_weights=rollout_is_weights,
-                        )
-                        micro_batch_metrics.update(pg_metrics)
+                    #if self.override_pg_loss:
+                    #    if self.include_advantages_in_loss:
+                    #        pg_loss = agg_loss(loss_mat=-log_prob*advantages, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                    #    else:
+                    #        pg_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                    #else:
+
+                    # Compute policy loss (any function is expected to return 2 values)
+                    pg_loss, pg_metrics = policy_loss_fn(
+                        old_log_prob=old_log_prob,
+                        log_prob=log_prob,
+                        advantages=advantages if self.include_advantages_in_loss else torch.ones_like(advantages),
+                        response_mask=response_mask,
+                        loss_agg_mode=loss_agg_mode,
+                        config=self.config,
+                        rollout_is_weights=rollout_is_weights,
+                    )
+                    micro_batch_metrics.update(pg_metrics)
 
                     if entropy_coeff != 0:
                         entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
