@@ -708,8 +708,6 @@ class DataParallelPPOActor(BasePPOActor):
                     )
                     micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
-                self.projections = self.get_random_projections(micro_batches)
-
                 self.actor_optimizer.zero_grad()
 
                 for mcb_idx, micro_batch in enumerate(micro_batches):
