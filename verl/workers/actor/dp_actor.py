@@ -711,7 +711,6 @@ class DataParallelPPOActor(BasePPOActor):
                 self.actor_optimizer.zero_grad()
 
                 for mcb_idx, micro_batch in enumerate(micro_batches):
-                    self.projection_block = self.projections[mcb_idx]
                     micro_batch = micro_batch.to(get_device_id())
                     micro_batch_metrics = {}
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
