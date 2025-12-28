@@ -99,10 +99,12 @@ switch-alg \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=sequence \
     trainer.experiment_name=seppo-seq-norm-1-rel-overlap-2-batch \
-    +actor_rollout_ref.actor.seppo_norm_neg_power=1.0 \
-    +actor_rollout_ref.actor.seppo_rel_overlap_neg_power=2.0 \
+    +actor_rollout_ref.actor.seppo_norm_neg_power=0.0 \
+    +actor_rollout_ref.actor.seppo_rel_overlap_neg_power=0.0 \
+    +actor_rollout_ref.actor.seppo_overlap_neg_power=0.0 \
     +actor_rollout_ref.actor.seppo_norm_reg=1.0 \
     +actor_rollout_ref.actor.seppo_rel_overlap_reg=1.0 \
+    +actor_rollout_ref.actor.seppo_overlap_reg=1.0 \
     +actor_rollout_ref.actor.override_pg_loss=True 
 
 bash run/next.sh

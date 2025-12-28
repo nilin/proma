@@ -110,7 +110,9 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_noise_neg_power = self.config.get("seppo_noise_neg_power", 0.0)
         self.seppo_overlap_neg_power = self.config.get("seppo_overlap_neg_power", 0.0)
         self.seppo_rel_overlap_neg_power = self.config.get("seppo_rel_overlap_neg_power", 0.0)
+
         self.seppo_rel_overlap_reg = self.config.get("seppo_rel_overlap_reg", 1.0)
+        self.seppo_overlap_reg = self.config.get("seppo_overlap_reg", 1.0)
         self.seppo_norm_reg = self.config.get("seppo_norm_reg", 1.0)
 
         self.seppo_big_noise = self.config.get("seppo_big_noise", False)
@@ -229,51 +231,30 @@ class DataParallelPPOActor(BasePPOActor):
                         for i, (act_in_seq, g_out_seq, advantage) in enumerate(zip(act_in_seqs, g_out_seqs, self.seq_advantages)):
                             seq_grad = g_out_seq.T @ act_in_seq
 
-                            _g = g_out_seq - torch.mean(g_out_seq, dim=0, keepdim=True)
-                            _a = act_in_seq - torch.mean(act_in_seq, dim=0, keepdim=True)
-
-                            if self.seppo_big_noise:
-                                noise = torch.sqrt(_g.pow(2).T @ _a.pow(2))
-                            else:
-                                noise = torch.norm(torch.norm(_a, dim=1) * torch.norm(_g, dim=1))
-
                             overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
 
                             overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
 
-                            p,q,r = self.seppo_norm_neg_power, self.seppo_noise_neg_power, self.seppo_overlap_neg_power
+                            p,r = self.seppo_norm_neg_power, self.seppo_overlap_neg_power
                             pp = self.seppo_norm_pos_power
 
                             if self.include_advantages_in_loss:
                                 raise ValueError("seppo to be used with separate_advantages")
                             else:
-                                norm2 = torch.norm(seq_grad).pow(2)
-                                norm2 = norm2 + self.seppo_norm_reg * self.batch_stats(f"seppo_norm2_reg_{lname}", norm2)
-                                rescaling = torch.norm(seq_grad).pow(pp) / (norm2.pow(p/2)*noise.pow(q)*overlap.pow(r) + 1e-8)
+                                def add_reg_to_square(x, reg_factor, name, keep_small_invariant=False):
+                                    reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
+                                    if keep_small_invariant:
+                                        return torch.sqrt(x.pow(2) + reg) / (reg + 1e-8)
+                                    else:
+                                        return torch.sqrt(x.pow(2) + reg)
 
-                                overlap_over_norm2 = overlap_over_norm.pow(2)
-                                reg = self.seppo_rel_overlap_reg * self.batch_stats(f"seppo_rel_overlap2_reg_{lname}", overlap_over_norm2)
-                                rescaling = rescaling * reg / (overlap_over_norm2 + reg + 1e-8).pow(self.seppo_rel_overlap_neg_power / 2)
-                                #print(f"rescaling: {rescaling}")
-                                scaling = rescaling * advantage
+                                norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.seppo_norm_reg, "norm")
+                                overlap_w_reg = add_reg_to_square(overlap, self.seppo_overlap_reg, "overlap")
+                                rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.seppo_rel_overlap_reg, "rel_overlap", keep_small_invariant=True)
+                                scaling_factor = torch.norm(seq_grad).pow(pp) / (norm_w_reg.pow(p)*overlap_w_reg.pow(r)*rel_overlap_w_reg.pow(r) + 1e-8)
+                                scaling = scaling_factor * advantage
 
                             grad += scaling * seq_grad 
-
-                            if noise == 0.0 and advantage != 0.0:
-                                self.done_tests.add("debug_0")
-                                self.dump_tensors({
-                                    f"attention_mask": self.attention_mask,
-                                    f"act_in": act_in,
-                                    f"g_out": g_out,
-                                    f"act_in_seq_{i}": act_in_seq,
-                                    f"g_out_seq_{i}": g_out_seq,
-                                    f"advantage_{i}": advantage,
-                                    f"seq_grad_{i}": seq_grad,
-                                    f"noise_{i}": noise,
-                                    f"scaling_{i}": scaling,
-                                    f"grad_{i}": grad,
-                                }, name=f"debug_0")
-                                raise ValueError(f"noise == 0.0 and advantage != 0.0 for {lname} {i}, likely indexing error")
 
                     if hasattr(mod, "suppo_grad"):
                         mod.suppo_grad += grad
