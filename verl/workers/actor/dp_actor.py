@@ -230,7 +230,7 @@ class DataParallelPPOActor(BasePPOActor):
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(functools.partial(_bwd_hook, lname=lname))
 
-    def batch_stats(self, name: str, value: torch.Tensor, ema_decay: float = 0.9) -> torch.Tensor:
+    def batch_stats(self, name: str, value: torch.Tensor) -> torch.Tensor:
         if not hasattr(self, "done_batch_stats"):
             self.done_batch_stats = {}
         if not hasattr(self, "current_batch_stats"):
@@ -242,23 +242,18 @@ class DataParallelPPOActor(BasePPOActor):
         self.current_batch_stats[name].append(value)
         
         if name in self.done_batch_stats:
-            return self.list_ema(self.done_batch_stats[name], ema_decay)
+            return self.done_batch_stats[name]
         else:
             print(f"no batch history for {name}, returning value {value}")
             return value
 
-    def list_ema(self, values: list[torch.Tensor], ema_decay: float = 0.9) -> torch.Tensor:
-        res = values[0]
-        for value in values[1:]:
-            res = res * ema_decay + value * (1 - ema_decay)
-        return res
-
-    def update_batch_stats(self):
+    def update_batch_stats(self, ema_decay: float = 0.9):
         for name, values in self.current_batch_stats.items():
+            current_value = torch.mean(torch.stack(values))
             if name not in self.done_batch_stats:
-                self.done_batch_stats[name] = []
-            self.done_batch_stats[name].append(torch.mean(torch.stack(values)))
-            self.current_batch_stats[name].clear()
+                self.done_batch_stats[name] = current_value
+            else:
+                self.done_batch_stats[name] = self.done_batch_stats[name] * ema_decay + current_value * (1 - ema_decay)
 
     def reset_seppo_cache(self):
         for lname, lmod in self.linear_modules.items():
