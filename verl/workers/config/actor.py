@@ -125,14 +125,15 @@ class ActorConfig(BaseConfig):
     seppo_adjustment_threshold: float = 0.2
     seppo_skip_rank_1: bool = False
     seppo_big_noise: bool = False
-    seppo_overlap_largest: bool = True
     seppo_norm_pos_power: float = 1.0
     seppo_norm_neg_power: float = 0.0
     seppo_noise_neg_power: float = 1.0
     seppo_overlap_neg_power: float = 0.0
-    seppo_overlap_random: bool = False
+    seppo_overlap_random: bool = True
+    seppo_overlap_largest: bool = False
     seppo_rel_overlap_neg_power: float = 0.0
     seppo_rel_overlap_reg: float = 1.0
+    seppo_norm_reg: float = 1.0
     seppo_nat: bool = False
     seppo_nat_reg: float = 1.0
     override_pg_loss: bool = False
