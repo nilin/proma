@@ -39,7 +39,7 @@ from verl.utils.torch_functional import logprobs_from_logits
 from verl.utils.ulysses import gather_outputs_and_unpad, ulysses_pad, ulysses_pad_and_slice_inputs
 from verl.workers.actor import BasePPOActor
 from verl.workers.config import ActorConfig
-
+import functools
 import math
 
 __all__ = ["DataParallelPPOActor"]
@@ -303,7 +303,6 @@ class DataParallelPPOActor(BasePPOActor):
                             })
 
             if self.testing and i in [8,16,32,64,128]:
-                import functools
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(functools.partial(_bwd_hook, dump=True, lname=lname))
             else:
