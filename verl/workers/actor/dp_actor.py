@@ -221,7 +221,7 @@ class DataParallelPPOActor(BasePPOActor):
                         advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
 
                         grad = torch.stack(seq_grads, dim=-1) @ advantages_preconditioned
-                        print("using nat")
+                        #print("using nat")
 
                     else:
                         grad = 0.0

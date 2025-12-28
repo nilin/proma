@@ -88,9 +88,9 @@ switch-alg \
     trainer.total_training_steps=102 \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=sequence \
-    trainer.experiment_name=seppo-seq-norm-1-rel-overlap-2 \
-    +actor_rollout_ref.actor.seppo_norm_neg_power=1.0 \
-    +actor_rollout_ref.actor.seppo_rel_overlap_neg_power=2.0 \
+    +actor_rollout_ref.actor.seppo_nat=True \
+    +actor_rollout_ref.actor.seppo_nat_reg=1.0 \
+    trainer.experiment_name=seppo-seq-nat-batch \
     +actor_rollout_ref.actor.override_pg_loss=True 
 
 switch-alg \
@@ -98,9 +98,9 @@ switch-alg \
     trainer.total_training_steps=102 \
     +actor_rollout_ref.actor.use_seppo=True \
     +actor_rollout_ref.actor.seppo_mode=sequence \
-    +actor_rollout_ref.actor.seppo_nat=True \
-    +actor_rollout_ref.actor.seppo_nat_reg=1.0 \
-    trainer.experiment_name=seppo-seq-nat \
+    trainer.experiment_name=seppo-seq-norm-1-rel-overlap-2-batch \
+    +actor_rollout_ref.actor.seppo_norm_neg_power=1.0 \
+    +actor_rollout_ref.actor.seppo_rel_overlap_neg_power=2.0 \
     +actor_rollout_ref.actor.override_pg_loss=True 
 
 bash run/next.sh
