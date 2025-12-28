@@ -248,8 +248,9 @@ class DataParallelPPOActor(BasePPOActor):
                             else:
                                 rescaling = torch.norm(seq_grad).pow(pp) / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
 
-                                reg = self.seppo_rel_overlap_reg * self.batch_stats(f"seppo_rel_overlap_reg_{lname}", overlap_over_norm)
-                                rescaling = rescaling * reg / (overlap_over_norm + reg + 1e-8).pow(self.seppo_rel_overlap_neg_power)
+                                overlap_over_norm2 = overlap_over_norm.pow(2)
+                                reg = self.seppo_rel_overlap_reg * self.batch_stats(f"seppo_rel_overlap2_reg_{lname}", overlap_over_norm2)
+                                rescaling = rescaling * reg / (overlap_over_norm2 + reg + 1e-8).pow(self.seppo_rel_overlap_neg_power / 2)
                                 #print(f"rescaling: {rescaling}")
                                 scaling = rescaling * advantage
 
