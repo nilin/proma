@@ -159,67 +159,65 @@ class DataParallelPPOActor(BasePPOActor):
                 if g_out.dim() >= 3 and g_out.size(0) == 1:
                     g_out = g_out[0]
 
-                if True:
-                    # for overlap computation against a fixed set of samples
-                    perm = torch.randperm(act_in.shape[0], device=act_in.device)
-                    topk_idx = perm[:250]
-                    a0 = act_in[topk_idx]
-                    g0 = g_out[topk_idx]
+                # for overlap computation against a fixed set of samples
+                perm = torch.randperm(act_in.shape[0], device=act_in.device)
+                topk_idx = perm[:250]
+                a0 = act_in[topk_idx]
+                g0 = g_out[topk_idx]
 
-                    act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
-                    g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
+                act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
+                g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
 
-                    if self.seppo_nat:
-                        seq_grads = []
-                        for i, (act_in_seq, g_out_seq) in enumerate(zip(act_in_seqs, g_out_seqs)):
-                            seq_grads.append(g_out_seq.T @ act_in_seq)
+                if self.seppo_nat:
+                    seq_grads = []
+                    for i, (act_in_seq, g_out_seq) in enumerate(zip(act_in_seqs, g_out_seqs)):
+                        seq_grads.append(g_out_seq.T @ act_in_seq)
 
-                        ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
-                        for i in range(len(seq_grads)):
-                            for j in range(i, len(seq_grads)):
-                                ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
-                                ntk[j, i] = ntk[i, j]
-                        D, U = torch.linalg.eigh(ntk)
-                        reg = self.seppo_nat_reg * self.batch_stats(f"seppo_nat_reg_{lname}", torch.mean(D))
-                        preconditioner = reg / (D + reg + 1e-8)
-                        advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
+                    ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
+                    for i in range(len(seq_grads)):
+                        for j in range(i, len(seq_grads)):
+                            ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
+                            ntk[j, i] = ntk[i, j]
+                    D, U = torch.linalg.eigh(ntk)
+                    reg = self.seppo_nat_reg * self.batch_stats(f"seppo_nat_reg_{lname}", torch.mean(D))
+                    preconditioner = reg / (D + reg + 1e-8)
+                    advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
 
-                        grad = torch.stack(seq_grads, dim=-1) @ advantages_preconditioned
+                    grad = torch.stack(seq_grads, dim=-1) @ advantages_preconditioned
 
-                    else:
-                        grad = 0.0
-                        for i, (act_in_seq, g_out_seq, advantage) in enumerate(zip(act_in_seqs, g_out_seqs, self.seq_advantages)):
-                            seq_grad = g_out_seq.T @ act_in_seq
+                else:
+                    grad = 0.0
+                    for i, (act_in_seq, g_out_seq, advantage) in enumerate(zip(act_in_seqs, g_out_seqs, self.seq_advantages)):
+                        seq_grad = g_out_seq.T @ act_in_seq
 
-                            overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
+                        overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
 
-                            overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
+                        overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
 
-                            p,q,r = self.seppo_norm_neg_power, self.seppo_overlap_neg_power, self.seppo_rel_overlap_neg_power
+                        p,q,r = self.seppo_norm_neg_power, self.seppo_overlap_neg_power, self.seppo_rel_overlap_neg_power
 
-                            assert not self.include_advantages_in_loss, "seppo to be used with separate_advantages"
+                        assert not self.include_advantages_in_loss, "seppo to be used with separate_advantages"
 
-                            if True:
-                                def add_reg_to_square(x, reg_factor, name, keep_small_invariant=False):
-                                    reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
-                                    if keep_small_invariant:
-                                        return torch.sqrt(x.pow(2) + reg) / (reg + 1e-8)
-                                    else:
-                                        return torch.sqrt(x.pow(2) + reg)
+                        def add_reg_to_square(x, reg_factor, name, keep_small_invariant=False):
+                            reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
+                            if keep_small_invariant:
+                                return torch.sqrt(x.pow(2) + reg) / (reg + 1e-8)
+                            else:
+                                return torch.sqrt(x.pow(2) + reg)
 
-                                norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.seppo_norm_reg, "norm")
-                                overlap_w_reg = add_reg_to_square(overlap, self.seppo_overlap_reg, "overlap")
-                                rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.seppo_rel_overlap_reg, "rel_overlap")
+                        norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.seppo_norm_reg, "norm")
+                        overlap_w_reg = add_reg_to_square(overlap, self.seppo_overlap_reg, "overlap")
+                        rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.seppo_rel_overlap_reg, "rel_overlap")
 
-                                scaling_factor = 1.0 / (norm_w_reg.pow(p) * overlap_w_reg.pow(q) * rel_overlap_w_reg.pow(r) + 1e-8)
-                                scaling = scaling_factor * advantage
+                        scaling_factor = 1.0 / (norm_w_reg.pow(p) * overlap_w_reg.pow(q) * rel_overlap_w_reg.pow(r) + 1e-8)
+                        scaling = scaling_factor * advantage
 
-                            grad += scaling * seq_grad 
+                        grad += scaling * seq_grad 
 
-                    if hasattr(mod, "suppo_grad"):
-                        mod.suppo_grad += grad
-                    else:
-                        mod.suppo_grad = grad
+                if hasattr(mod, "suppo_grad"):
+                    mod.suppo_grad += grad
+                else:
+                    mod.suppo_grad = grad
 
 
             if self.testing and i in [8,16,32,64,128]:
@@ -829,9 +827,8 @@ class DataParallelPPOActor(BasePPOActor):
                             g_local = dtg.to_local()
                             # Select matching per-row/col scalars and align dtype/device
 
-                            if True:
-                                grad_transformed = 0.0 * g_local.clone() + lmod.suppo_grad
-                                lmod.suppo_grad = 0.0
+                            grad_transformed = 0.0 * g_local.clone() + lmod.suppo_grad
+                            lmod.suppo_grad = 0.0
 
                             with torch.no_grad():
                                 g_local.copy_(grad_transformed)
