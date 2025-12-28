@@ -308,7 +308,7 @@ class DataParallelPPOActor(BasePPOActor):
                 lmod.register_full_backward_hook(functools.partial(_bwd_hook, dump=True, lname=lname))
             else:
                 lmod.register_forward_hook(_fwd_hook)
-                lmod.register_full_backward_hook(_bwd_hook, lname=lname)
+                lmod.register_full_backward_hook(functools.partial(_bwd_hook, lname=lname))
 
     def batch_stats(self, name: str, value: torch.Tensor, ema_decay: float = 0.9) -> torch.Tensor:
         if not hasattr(self, "done_batch_stats"):
