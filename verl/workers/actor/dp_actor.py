@@ -93,7 +93,6 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo = self.config.get("use_seppo", False)
         self.testing = self.config.get("seppo_testing", False)
 
-        self.seppo_norm_pos_power = self.config.get("seppo_norm_pos_power", 0.0)
         self.seppo_norm_neg_power = self.config.get("seppo_norm_neg_power", 0.0)
         self.seppo_overlap_neg_power = self.config.get("seppo_overlap_neg_power", 0.0)
         self.seppo_rel_overlap_neg_power = self.config.get("seppo_rel_overlap_neg_power", 0.0)
@@ -196,12 +195,11 @@ class DataParallelPPOActor(BasePPOActor):
 
                             overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
 
-                            p,r = self.seppo_norm_neg_power, self.seppo_overlap_neg_power
-                            pp = self.seppo_norm_pos_power
+                            p,q,r = self.seppo_norm_neg_power, self.seppo_overlap_neg_power, self.seppo_rel_overlap_neg_power
 
-                            if self.include_advantages_in_loss:
-                                raise ValueError("seppo to be used with separate_advantages")
-                            else:
+                            assert not self.include_advantages_in_loss, "seppo to be used with separate_advantages"
+
+                            if True:
                                 def add_reg_to_square(x, reg_factor, name, keep_small_invariant=False):
                                     reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
                                     if keep_small_invariant:
@@ -211,8 +209,9 @@ class DataParallelPPOActor(BasePPOActor):
 
                                 norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.seppo_norm_reg, "norm")
                                 overlap_w_reg = add_reg_to_square(overlap, self.seppo_overlap_reg, "overlap")
-                                rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.seppo_rel_overlap_reg, "rel_overlap", keep_small_invariant=True)
-                                scaling_factor = torch.norm(seq_grad).pow(pp) / (norm_w_reg.pow(p)*overlap_w_reg.pow(r)*rel_overlap_w_reg.pow(r) + 1e-8)
+                                rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.seppo_rel_overlap_reg, "rel_overlap")
+
+                                scaling_factor = 1.0 / (norm_w_reg.pow(p) * overlap_w_reg.pow(q) * rel_overlap_w_reg.pow(r) + 1e-8)
                                 scaling = scaling_factor * advantage
 
                             grad += scaling * seq_grad 

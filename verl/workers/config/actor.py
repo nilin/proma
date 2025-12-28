@@ -127,7 +127,6 @@ class ActorConfig(BaseConfig):
     seppo_big_noise: bool = False
     seppo_overlap_random: bool = True
     seppo_overlap_largest: bool = False
-    seppo_norm_pos_power: float = 0.0
     seppo_norm_neg_power: float = 0.0
     seppo_noise_neg_power: float = 0.0
     seppo_overlap_neg_power: float = 0.0
