@@ -111,6 +111,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_overlap_neg_power = self.config.get("seppo_overlap_neg_power", 0.0)
         self.seppo_rel_overlap_neg_power = self.config.get("seppo_rel_overlap_neg_power", 0.0)
         self.seppo_rel_overlap_reg = self.config.get("seppo_rel_overlap_reg", 1.0)
+        self.seppo_norm_reg = self.config.get("seppo_norm_reg", 1.0)
 
         self.seppo_big_noise = self.config.get("seppo_big_noise", False)
         self.override_pg_loss = self.config.get("override_pg_loss", False)
@@ -246,7 +247,9 @@ class DataParallelPPOActor(BasePPOActor):
                             if self.include_advantages_in_loss:
                                 raise ValueError("seppo to be used with separate_advantages")
                             else:
-                                rescaling = torch.norm(seq_grad).pow(pp) / (torch.norm(seq_grad).pow(p)*noise.pow(q)*overlap.pow(r) + 1e-8)
+                                norm2 = torch.norm(seq_grad).pow(2)
+                                norm2 = norm2 + self.seppo_norm_reg * self.batch_stats(f"seppo_norm2_reg_{lname}", norm2)
+                                rescaling = torch.norm(seq_grad).pow(pp) / (norm2.pow(p/2)*noise.pow(q)*overlap.pow(r) + 1e-8)
 
                                 overlap_over_norm2 = overlap_over_norm.pow(2)
                                 reg = self.seppo_rel_overlap_reg * self.batch_stats(f"seppo_rel_overlap2_reg_{lname}", overlap_over_norm2)
