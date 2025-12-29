@@ -204,7 +204,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 keep_small_invariant = False
 
                             if keep_small_invariant:
-                                return torch.sqrt(x.pow(2) + reg) / (reg + 1e-8)
+                                return torch.sqrt(x.pow(2) / (reg + 1e-8) + 1.0)
                             else:
                                 return torch.sqrt(x.pow(2) + reg)
 
