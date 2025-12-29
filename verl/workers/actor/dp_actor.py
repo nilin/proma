@@ -198,7 +198,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                         assert not self.include_advantages_in_loss, "seppo to be used with separate_advantages"
 
-                        def add_reg_to_square(x, reg_factor, name, keep_small_invariant=False):
+                        def add_reg_to_square(x, reg_factor, name, keep_small_invariant=True):
                             reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
                             if keep_small_invariant:
                                 return torch.sqrt(x.pow(2) + reg) / (reg + 1e-8)
