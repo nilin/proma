@@ -101,6 +101,7 @@ switch-alg \
     +actor_rollout_ref.actor.seppo_overlap_neg_power=1.0 \
     +actor_rollout_ref.actor.seppo_rel_overlap_neg_power=0.0 \
     +actor_rollout_ref.actor.seppo_overlap_reg=1.0 \
+    +actor_rollout_ref.actor.seppo_keep_small_invariant=True \
     +actor_rollout_ref.actor.override_pg_loss=True 
 
 bash run/next.sh

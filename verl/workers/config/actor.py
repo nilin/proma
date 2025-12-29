@@ -118,6 +118,7 @@ class ActorConfig(BaseConfig):
     seppo_rel_overlap_neg_power: float = 0.0
     seppo_rel_overlap_reg: float = 1.0
     seppo_overlap_reg: float = 1.0
+    seppo_keep_small_invariant: bool = True
     seppo_norm_reg: float = 1.0
     seppo_nat_reg: float = 1.0
     seppo_nat: bool = False

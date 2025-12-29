@@ -103,7 +103,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.seppo_nat_reg = self.config.get("seppo_nat_reg", 1.0)
 
         self.override_pg_loss = self.config.get("override_pg_loss", False)
-
+        self.seppo_keep_small_invariant = self.config.get("seppo_keep_small_invariant", True)
         self.seppo_nat = self.config.get("seppo_nat", False)
 
         if self.seppo:
@@ -198,8 +198,11 @@ class DataParallelPPOActor(BasePPOActor):
 
                         assert not self.include_advantages_in_loss, "seppo to be used with separate_advantages"
 
-                        def add_reg_to_square(x, reg_factor, name, keep_small_invariant=True):
+                        def add_reg_to_square(x, reg_factor, name, keep_small_invariant=self.seppo_keep_small_invariant):
                             reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
+                            if reg_factor == 0.0:
+                                keep_small_invariant = False
+
                             if keep_small_invariant:
                                 return torch.sqrt(x.pow(2) + reg) / (reg + 1e-8)
                             else:
