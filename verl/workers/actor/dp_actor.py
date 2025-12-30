@@ -87,28 +87,28 @@ class DataParallelPPOActor(BasePPOActor):
         self.device_name = get_device_name()
 
         #########################################################
-        # SEPPO hooks
+        # ISOPO hooks
         #########################################################
 
-        self.seppo = self.config.get("use_seppo", False)
-        self.testing = self.config.get("seppo_testing", False)
+        self.isopo = self.config.get("use_isopo", False)
+        self.testing = self.config.get("isopo_testing", False)
 
-        self.seppo_norm_neg_power = self.config.get("seppo_norm_neg_power", 0.0)
-        self.seppo_overlap_neg_power = self.config.get("seppo_overlap_neg_power", 0.0)
-        self.seppo_rel_overlap_neg_power = self.config.get("seppo_rel_overlap_neg_power", 0.0)
+        self.isopo_norm_neg_power = self.config.get("isopo_norm_neg_power", 0.0)
+        self.isopo_overlap_neg_power = self.config.get("isopo_overlap_neg_power", 0.0)
+        self.isopo_rel_overlap_neg_power = self.config.get("isopo_rel_overlap_neg_power", 0.0)
 
-        self.seppo_rel_overlap_reg = self.config.get("seppo_rel_overlap_reg", 1.0)
-        self.seppo_overlap_reg = self.config.get("seppo_overlap_reg", 1.0)
-        self.seppo_norm_reg = self.config.get("seppo_norm_reg", 1.0)
-        self.seppo_nat_reg = self.config.get("seppo_nat_reg", 1.0)
+        self.isopo_rel_overlap_reg = self.config.get("isopo_rel_overlap_reg", 1.0)
+        self.isopo_overlap_reg = self.config.get("isopo_overlap_reg", 1.0)
+        self.isopo_norm_reg = self.config.get("isopo_norm_reg", 1.0)
+        self.isopo_nat_reg = self.config.get("isopo_nat_reg", 1.0)
 
         self.override_pg_loss = self.config.get("override_pg_loss", False)
-        self.seppo_keep_small_invariant = self.config.get("seppo_keep_small_invariant", True)
-        self.seppo_nat = self.config.get("seppo_nat", False)
+        self.isopo_keep_small_invariant = self.config.get("isopo_keep_small_invariant", True)
+        self.isopo_nat = self.config.get("isopo_nat", False)
 
-        if self.seppo:
-            self.install_seppo_hooks()
-            self.reset_seppo_cache()
+        if self.isopo:
+            self.install_isopo_hooks()
+            self.reset_isopo_cache()
             self.include_advantages_in_loss = False
         else:
             self.include_advantages_in_loss = True
@@ -121,8 +121,8 @@ class DataParallelPPOActor(BasePPOActor):
 
     #########################################################
 
-    def install_seppo_hooks(self):
-        """Install SEPPO hooks that
+    def install_isopo_hooks(self):
+        """Install ISOPO hooks that
         - store forward activations (act_in) per Linear layer
         - compute a per-layer scalar from act_in and backward grad_out in a full backward hook
         - use that scalar to scale the parameter gradients via param hooks
@@ -133,20 +133,20 @@ class DataParallelPPOActor(BasePPOActor):
 
         for i, (lname, lmod) in enumerate(self.linear_modules.items()):
             # storage on module
-            lmod._seppo_act_in = None
-            lmod._seppo_scale = 1.0
+            lmod._isopo_act_in = None
+            lmod._isopo_scale = 1.0
 
             # Forward hook to capture input activations
             def _fwd_hook(mod, inputs, output):
                 in_tensor = inputs[0] if isinstance(inputs, (tuple, list)) else inputs
                 try:
-                    mod._seppo_act_in = in_tensor.detach().clone()
+                    mod._isopo_act_in = in_tensor.detach().clone()
                 except Exception:
-                    mod._seppo_act_in = None
+                    mod._isopo_act_in = None
 
             # Full backward hook to compute a scalar using act_in and grad_out
             def _bwd_hook(mod, grad_input, grad_output, dump=False, lname=None):
-                act_in = mod._seppo_act_in.clone()
+                act_in = mod._isopo_act_in.clone()
                 _g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
                 g_out = _g_out.clone()
 
@@ -168,7 +168,7 @@ class DataParallelPPOActor(BasePPOActor):
                 act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
                 g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
 
-                if self.seppo_nat:
+                if self.isopo_nat:
                     seq_grads = []
                     for i, (act_in_seq, g_out_seq) in enumerate(zip(act_in_seqs, g_out_seqs)):
                         seq_grads.append(g_out_seq.T @ act_in_seq)
@@ -179,7 +179,7 @@ class DataParallelPPOActor(BasePPOActor):
                             ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
                             ntk[j, i] = ntk[i, j]
                     D, U = torch.linalg.eigh(ntk)
-                    reg = self.seppo_nat_reg * self.batch_stats(f"seppo_nat_reg_{lname}", torch.mean(D))
+                    reg = self.isopo_nat_reg * self.batch_stats(f"isopo_nat_reg_{lname}", torch.mean(D))
                     preconditioner = reg / (D + reg + 1e-8)
                     advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
 
@@ -194,11 +194,11 @@ class DataParallelPPOActor(BasePPOActor):
 
                         overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
 
-                        p,q,r = self.seppo_norm_neg_power, self.seppo_overlap_neg_power, self.seppo_rel_overlap_neg_power
+                        p,q,r = self.isopo_norm_neg_power, self.isopo_overlap_neg_power, self.isopo_rel_overlap_neg_power
 
-                        assert not self.include_advantages_in_loss, "seppo to be used with separate_advantages"
+                        assert not self.include_advantages_in_loss, "isopo to be used with separate_advantages"
 
-                        def add_reg_to_square(x, reg_factor, name, keep_small_invariant=self.seppo_keep_small_invariant):
+                        def add_reg_to_square(x, reg_factor, name, keep_small_invariant=self.isopo_keep_small_invariant):
                             reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
                             if reg_factor == 0.0:
                                 keep_small_invariant = False
@@ -208,9 +208,9 @@ class DataParallelPPOActor(BasePPOActor):
                             else:
                                 return torch.sqrt(x.pow(2) + reg)
 
-                        norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.seppo_norm_reg, "norm")
-                        overlap_w_reg = add_reg_to_square(overlap, self.seppo_overlap_reg, "overlap")
-                        rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.seppo_rel_overlap_reg, "rel_overlap")
+                        norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.isopo_norm_reg, "norm")
+                        overlap_w_reg = add_reg_to_square(overlap, self.isopo_overlap_reg, "overlap")
+                        rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.isopo_rel_overlap_reg, "rel_overlap")
 
                         scaling_factor = 1.0 / (norm_w_reg.pow(p) * overlap_w_reg.pow(q) * rel_overlap_w_reg.pow(r) + 1e-8)
                         scaling = scaling_factor * advantage
@@ -255,7 +255,7 @@ class DataParallelPPOActor(BasePPOActor):
             else:
                 self.done_batch_stats[name] = self.done_batch_stats[name] * ema_decay + current_value * (1 - ema_decay)
 
-    def reset_seppo_cache(self):
+    def reset_isopo_cache(self):
         for lname, lmod in self.linear_modules.items():
             try:
                 lmod.a_proj.clear()
@@ -337,7 +337,7 @@ class DataParallelPPOActor(BasePPOActor):
             np.save(f"dump/{name}_{id}/{key}.npy", arr)
 
     #########################################################
-    # seqwise seppo
+    # seqwise isopo
     #########################################################
 
     def test_flatten_unflatten(self, attention_mask: torch.Tensor):
@@ -722,7 +722,7 @@ class DataParallelPPOActor(BasePPOActor):
                         loss_scale_factor = 1 / self.gradient_accumulation
 
                     ################################################################################
-                    if self.seppo:
+                    if self.isopo:
                         self.attention_mask = attention_mask = model_inputs["attention_mask"]
                         self.seq_advantages = advantages[:, 0].to(attention_mask.device)
                         self.test_flatten_unflatten(attention_mask)
@@ -812,7 +812,7 @@ class DataParallelPPOActor(BasePPOActor):
                     if self.testing:
                         break
 
-                if self.seppo:
+                if self.isopo:
                     for lname, lmod in self.linear_modules.items():
                         for pname, p in lmod.named_parameters(recurse=False):
                             dtg = p.grad
@@ -836,7 +836,7 @@ class DataParallelPPOActor(BasePPOActor):
                             with torch.no_grad():
                                 g_local.copy_(grad_transformed)
 
-                    self.reset_seppo_cache()
+                    self.reset_isopo_cache()
                     self.update_batch_stats()
                 ################################################################################
 

@@ -110,18 +110,18 @@ class ActorConfig(BaseConfig):
     use_torch_compile: bool = True
     kl_loss_coef: float = 0.001
     kl_loss_type: str = "low_var_kl"
-    # Enable SEPPO hooks in the actor implementation when True
-    use_seppo: bool = False
-    seppo_testing: bool = False
-    seppo_norm_neg_power: float = 0.0
-    seppo_overlap_neg_power: float = 0.0
-    seppo_rel_overlap_neg_power: float = 0.0
-    seppo_rel_overlap_reg: float = 1.0
-    seppo_overlap_reg: float = 1.0
-    seppo_keep_small_invariant: bool = True
-    seppo_norm_reg: float = 1.0
-    seppo_nat_reg: float = 1.0
-    seppo_nat: bool = False
+    # Enable ISOPO hooks in the actor implementation when True
+    use_isopo: bool = False
+    isopo_testing: bool = False
+    isopo_norm_neg_power: float = 0.0
+    isopo_overlap_neg_power: float = 0.0
+    isopo_rel_overlap_neg_power: float = 0.0
+    isopo_rel_overlap_reg: float = 1.0
+    isopo_overlap_reg: float = 1.0
+    isopo_keep_small_invariant: bool = True
+    isopo_norm_reg: float = 1.0
+    isopo_nat_reg: float = 1.0
+    isopo_nat: bool = False
     override_pg_loss: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False
