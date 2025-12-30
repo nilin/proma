@@ -1,7 +1,10 @@
-# Self-Proximal Policy Gradients without pi-old
+# ISOPO: Proximal policy gradients without pi-old
+
 **Nilin Abrahamsen**
 
-This repo is a fork of [VeRL](https://github.com/volcengine/verl) to demonstrate the ISOPO self-proximal policy gradient.
+
+This repo contains a demonstration of the ISOPO isometric policy gradient (https://arxiv.org/pdf/2512.23353). It is a fork of [VeRL](https://github.com/volcengine/verl).
+
 
 
 ### Setup
@@ -35,22 +38,6 @@ pip install flashinfer-python -i https://pypi.org/simple
 
 pip install huggingface_hub[cli]
 huggingface-cli download Qwen/Qwen3-0.6B --local-dir ./models/Qwen3-0.6B
-python examples/data_preprocess/gsm8k.py
-
-# substitute with your wandb key
-wandb login $WANDB_API_KEY
-```
-
-
-**Old version**
-```
-conda env create -f environment.yml -n isopo1
-conda activate isopo1
-pip install flash-attn==2.8.3 --no-build-isolation
-
-pip install huggingface_hub[cli]
-huggingface-cli download Qwen/Qwen3-0.6B --local-dir ./models/Qwen3-0.6B
-
 python examples/data_preprocess/gsm8k.py
 
 # substitute with your wandb key
