@@ -18,3 +18,6 @@ nvcc --version
 # 3) Install FlashInfer from PyPI (correct package name)
 pip install flashinfer-python -i https://pypi.org/simple
 
+pip install huggingface_hub[cli]
+huggingface-cli download Qwen/Qwen3-0.6B --local-dir ./models/Qwen3-0.6B
+python examples/data_preprocess/gsm8k.py
