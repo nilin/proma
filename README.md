@@ -13,4 +13,5 @@ Isometric Policy Optimization (ISOPO) is an efficient method to approximate the 
 
 The implementation of ISOPO is in https://github.com/nilin/isopo/blob/main/verl/workers/actor/dp_actor.py
 
-[setup](setup.sh)
+- [setup example](setup.sh)
+- [run script example](run/run.sh)
