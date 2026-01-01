@@ -83,6 +83,20 @@ sgd="actor_rollout_ref.actor.optim.optimizer=SGD actor_rollout_ref.actor.optim.o
 
 lr=actor_rollout_ref.actor.optim.lr
 
+# non-interacting isopo
+switch-alg \
+    $pure \
+    trainer.total_training_steps=102 \
+    +actor_rollout_ref.actor.use_isopo=True \
+    trainer.experiment_name=isopo-overlap-1 \
+    +actor_rollout_ref.actor.isopo_overlap_neg_power=1.0 \
+    +actor_rollout_ref.actor.isopo_norm_neg_power=0.0 \
+    +actor_rollout_ref.actor.isopo_rel_overlap_neg_power=0.0 \
+    +actor_rollout_ref.actor.isopo_overlap_reg=0.0 \
+    +actor_rollout_ref.actor.isopo_keep_small_invariant=True \
+    +actor_rollout_ref.actor.override_pg_loss=True 
+
+# interacting isopo
 switch-alg \
     $pure \
     trainer.total_training_steps=102 \
@@ -92,35 +106,8 @@ switch-alg \
     trainer.experiment_name=isopo-seq-nat-batch \
     +actor_rollout_ref.actor.override_pg_loss=True 
 
-switch-alg \
-    $pure \
-    trainer.total_training_steps=102 \
-    +actor_rollout_ref.actor.use_isopo=True \
-    trainer.experiment_name=isopo-overlap-1 \
-    +actor_rollout_ref.actor.isopo_norm_neg_power=0.0 \
-    +actor_rollout_ref.actor.isopo_overlap_neg_power=1.0 \
-    +actor_rollout_ref.actor.isopo_rel_overlap_neg_power=0.0 \
-    +actor_rollout_ref.actor.isopo_overlap_reg=1.0 \
-    +actor_rollout_ref.actor.isopo_keep_small_invariant=True \
-    +actor_rollout_ref.actor.override_pg_loss=True 
 
 bash run/next.sh
 
-#    +actor_rollout_ref.actor.isopo_big_noise=True \
-#    $sgd \
-#    $lr=0.001
 
-
-#switch-alg \
-#    $pure \
-#    trainer.total_training_steps=102 \
-#    +actor_rollout_ref.actor.use_isopo=True \
-#    +actor_rollout_ref.actor.isopo_mode=sequence \
-#    trainer.experiment_name=isopo-seq-norm-1-rel-overlap-2-batch \
-#    +actor_rollout_ref.actor.isopo_norm_neg_power=0.0 \
-#    +actor_rollout_ref.actor.isopo_rel_overlap_neg_power=0.0 \
-#    +actor_rollout_ref.actor.isopo_overlap_neg_power=0.0 \
-#    +actor_rollout_ref.actor.isopo_norm_reg=1.0 \
-#    +actor_rollout_ref.actor.isopo_rel_overlap_reg=1.0 \
-#    +actor_rollout_ref.actor.isopo_overlap_reg=1.0 \
 #    +actor_rollout_ref.actor.override_pg_loss=True 
