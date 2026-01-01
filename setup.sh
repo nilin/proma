@@ -1,3 +1,8 @@
+curl -O https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh
+bash Anaconda3-2024.10-1-Linux-x86_64.sh -b
+source ~/anaconda3/bin/activate
+~/anaconda3/bin/conda init
+
 conda create -n isopo2 python==3.12 -y
 conda activate isopo2
 bash scripts/install_vllm_sglang_mcore.sh
@@ -18,6 +23,10 @@ nvcc --version
 # 3) Install FlashInfer from PyPI (correct package name)
 pip install flashinfer-python -i https://pypi.org/simple
 
+
 pip install huggingface_hub[cli]
 huggingface-cli download Qwen/Qwen3-0.6B --local-dir ./models/Qwen3-0.6B
 python examples/data_preprocess/gsm8k.py
+
+# substitute with your wandb key
+wandb login $WANDB_API_KEY
