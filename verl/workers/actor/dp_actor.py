@@ -105,6 +105,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.override_pg_loss = self.config.get("override_pg_loss", False)
         self.isopo_keep_small_invariant = self.config.get("isopo_keep_small_invariant", True)
         self.isopo_nat = self.config.get("isopo_nat", False)
+        self.isopo_reduce_projection = self.config.get("isopo_reduce_projection", 1.0)
 
         if self.isopo:
             self.install_isopo_hooks()
@@ -168,17 +169,18 @@ class DataParallelPPOActor(BasePPOActor):
                 act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
                 g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
 
-                if self.isopo_nat:
-                    seq_grads = []
-                    for i, (act_in_seq, g_out_seq) in enumerate(zip(act_in_seqs, g_out_seqs)):
-                        seq_grads.append(g_out_seq.T @ act_in_seq)
+                seq_grads = []
+                for i, (act_in_seq, g_out_seq) in enumerate(zip(act_in_seqs, g_out_seqs)):
+                    seq_grads.append(g_out_seq.T @ act_in_seq)
 
-                    ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
-                    for i in range(len(seq_grads)):
-                        for j in range(i, len(seq_grads)):
-                            ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
-                            ntk[j, i] = ntk[i, j]
-                    D, U = torch.linalg.eigh(ntk)
+                ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
+                for i in range(len(seq_grads)):
+                    for j in range(i, len(seq_grads)):
+                        ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
+                        ntk[j, i] = ntk[i, j]
+                D, U = torch.linalg.eigh(ntk)
+
+                if self.isopo_nat:
                     reg = self.isopo_nat_reg * self.batch_stats(f"isopo_nat_reg_{lname}", torch.mean(D))
                     preconditioner = reg / (D + reg + 1e-8)
                     advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
@@ -187,11 +189,9 @@ class DataParallelPPOActor(BasePPOActor):
 
                 else:
                     grad = 0.0
-                    for i, (act_in_seq, g_out_seq, advantage) in enumerate(zip(act_in_seqs, g_out_seqs, self.seq_advantages)):
-                        seq_grad = g_out_seq.T @ act_in_seq
+                    for i, (seq_grad, advantage) in enumerate(zip(seq_grads, self.seq_advantages)):
 
                         overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
-
                         overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
 
                         p,q,r = self.isopo_norm_neg_power, self.isopo_overlap_neg_power, self.isopo_rel_overlap_neg_power
@@ -218,7 +218,14 @@ class DataParallelPPOActor(BasePPOActor):
                         grad += scaling * seq_grad 
 
                 if hasattr(mod, "suppo_grad"):
-                    mod.suppo_grad += grad
+
+                    def project(grad):
+                        dot_products = torch.stack([torch.sum(grad*sg) for sg in seq_grads])
+                        inv = torch.linalg.inv(ntk + 1e-4 * torch.trace(ntk)/len(seq_grads))
+                        weights = inv @ dot_products
+                        return sum(w * sg for w,sg in zip(weights, seq_grads))
+
+                    mod.suppo_grad = mod.suppo_grad + (self.isopo_reduce_projection - 1.0) * project(mod.suppo_grad) + grad
                 else:
                     mod.suppo_grad = grad
 

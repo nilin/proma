@@ -122,6 +122,7 @@ class ActorConfig(BaseConfig):
     isopo_norm_reg: float = 1.0
     isopo_nat_reg: float = 1.0
     isopo_nat: bool = False
+    isopo_reduce_projection: float = 1.0
     override_pg_loss: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False
