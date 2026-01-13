@@ -101,6 +101,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.isopo_overlap_reg = self.config.get("isopo_overlap_reg", 1.0)
         self.isopo_norm_reg = self.config.get("isopo_norm_reg", 1.0)
         self.isopo_nat_reg = self.config.get("isopo_nat_reg", 1.0)
+        self.isopo_reduced_overlap_reg = self.config.get("isopo_reduced_overlap_reg", 1.0)
+        self.isopo_reduced_overlap_neg_power = self.config.get("isopo_reduced_overlap_neg_power", 0.0)
 
         self.override_pg_loss = self.config.get("override_pg_loss", False)
         self.isopo_keep_small_invariant = self.config.get("isopo_keep_small_invariant", True)
@@ -180,6 +182,16 @@ class DataParallelPPOActor(BasePPOActor):
                         ntk[j, i] = ntk[i, j]
                 D, U = torch.linalg.eigh(ntk)
 
+                def add_reg_to_square(x, reg_factor, name, keep_small_invariant=self.isopo_keep_small_invariant):
+                    reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
+                    if reg_factor == 0.0:
+                        keep_small_invariant = False
+
+                    if keep_small_invariant:
+                        return torch.sqrt(x.pow(2) / (reg + 1e-8) + 1.0)
+                    else:
+                        return torch.sqrt(x.pow(2) + reg)
+
                 if self.isopo_nat:
                     reg = self.isopo_nat_reg * self.batch_stats(f"isopo_nat_reg_{lname}", torch.mean(D))
                     preconditioner = reg / (D + reg + 1e-8)
@@ -198,16 +210,6 @@ class DataParallelPPOActor(BasePPOActor):
 
                         assert not self.include_advantages_in_loss, "isopo to be used with separate_advantages"
 
-                        def add_reg_to_square(x, reg_factor, name, keep_small_invariant=self.isopo_keep_small_invariant):
-                            reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
-                            if reg_factor == 0.0:
-                                keep_small_invariant = False
-
-                            if keep_small_invariant:
-                                return torch.sqrt(x.pow(2) / (reg + 1e-8) + 1.0)
-                            else:
-                                return torch.sqrt(x.pow(2) + reg)
-
                         norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.isopo_norm_reg, "norm")
                         overlap_w_reg = add_reg_to_square(overlap, self.isopo_overlap_reg, "overlap")
                         rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.isopo_rel_overlap_reg, "rel_overlap")
@@ -224,11 +226,18 @@ class DataParallelPPOActor(BasePPOActor):
                         inv = torch.linalg.inv(ntk + 1e-4 * (torch.trace(ntk)/len(seq_grads)) * torch.eye(len(seq_grads), device=ntk.device, dtype=ntk.dtype))
                         weights = inv @ dot_products
                         result = torch.zeros_like(seq_grads[0])
+
+                        print(f"projection weights: {weights}")
                         for w, sg in zip(weights, seq_grads):
                             result = result + w * sg
                         return result
 
-                    mod.suppo_grad = mod.suppo_grad + (self.isopo_reduce_projection - 1.0) * project(mod.suppo_grad) + grad
+                    reduced_overlap = torch.sum(mod.suppo_grad * grad) / torch.norm(mod.suppo_grad)
+                    reduced_overlap_reg = add_reg_to_square(reduced_overlap, self.isopo_reduced_overlap_reg, "reduced_overlap")
+                    reduced_scaling = 1.0 / (reduced_overlap + reduced_overlap_reg + 1e-8).pow(self.isopo_reduced_overlap_neg_power)
+
+                    print(f"reduced_scaling: {reduced_scaling.item()}")
+                    mod.suppo_grad = mod.suppo_grad + (self.isopo_reduce_projection - 1.0) * project(mod.suppo_grad) + grad * reduced_scaling
                 else:
                     mod.suppo_grad = grad
 
