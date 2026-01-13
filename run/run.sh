@@ -96,6 +96,8 @@ switch-alg \
     +actor_rollout_ref.actor.isopo_norm_reg=0.0 \
     +actor_rollout_ref.actor.isopo_rel_overlap_reg=0.0 \
     +actor_rollout_ref.actor.isopo_reduce_projection=1.0 \
+    +actor_rollout_ref.actor.isopo_reduced_overlap_reg=0.0 \
+    +actor_rollout_ref.actor.isopo_reduced_overlap_neg_power=0.0 \
     +actor_rollout_ref.actor.isopo_keep_small_invariant=False \
     +actor_rollout_ref.actor.override_pg_loss=True 
 
