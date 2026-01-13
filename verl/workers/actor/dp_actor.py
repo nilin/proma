@@ -234,7 +234,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                     reduced_overlap = torch.sum(mod.suppo_grad * grad) / torch.norm(mod.suppo_grad + 0.0 * grad)
                     reduced_overlap_reg = add_reg_to_square(reduced_overlap, self.isopo_reduced_overlap_reg, "reduced_overlap")
-                    reduced_scaling = 1.0 / (reduced_overlap + reduced_overlap_reg + 1e-8).pow(self.isopo_reduced_overlap_neg_power)
+                    reduced_scaling = (reduced_overlap_reg / (reduced_overlap + reduced_overlap_reg + 1e-8)).pow(self.isopo_reduced_overlap_neg_power)
 
                     print(f"reduced_scaling: {reduced_scaling.item()}")
                     mod.suppo_grad = mod.suppo_grad + (self.isopo_reduce_projection - 1.0) * project(mod.suppo_grad) + grad * reduced_scaling
