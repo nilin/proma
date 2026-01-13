@@ -254,6 +254,8 @@ class DataParallelPPOActor(BasePPOActor):
                 self.done_batch_stats[name] = current_value
             else:
                 self.done_batch_stats[name] = self.done_batch_stats[name] * ema_decay + current_value * (1 - ema_decay)
+            
+            self.current_batch_stats[name].clear()
 
     def reset_isopo_cache(self):
         for lname, lmod in self.linear_modules.items():
