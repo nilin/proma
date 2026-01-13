@@ -223,7 +223,10 @@ class DataParallelPPOActor(BasePPOActor):
                         dot_products = torch.stack([torch.sum(grad*sg) for sg in seq_grads])
                         inv = torch.linalg.inv(ntk + 1e-4 * torch.trace(ntk)/len(seq_grads))
                         weights = inv @ dot_products
-                        return sum(w * sg for w,sg in zip(weights, seq_grads))
+                        result = torch.zeros_like(seq_grads[0])
+                        for w, sg in zip(weights, seq_grads):
+                            result = result + w * sg
+                        return result
 
                     mod.suppo_grad = mod.suppo_grad + (self.isopo_reduce_projection - 1.0) * project(mod.suppo_grad) + grad
                 else:
