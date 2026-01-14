@@ -174,19 +174,6 @@ class DataParallelPPOActor(BasePPOActor):
                 for i, (act_in_seq, g_out_seq) in enumerate(zip(act_in_seqs, g_out_seqs)):
                     seq_grads.append(g_out_seq.T @ act_in_seq)
 
-                ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
-
-                for i in range(len(seq_grads)):
-                    for j in range(i, len(seq_grads)):
-
-                        ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
-                        ntk[j, i] = ntk[i, j]
-
-                seq_grads_norms = [torch.norm(sg) for sg in seq_grads]
-                seq_grads_normed = [sg / (norm + 1e-8) for sg, norm in zip(seq_grads, seq_grads_norms)]
-                seq_grads_norms = torch.stack(seq_grads_norms)
-                ntk_normed = ntk / (seq_grads_norms[:, None] * seq_grads_norms[None, :] + 1e-8)
-
                 def add_reg_to_square(x, reg_factor, name, keep_small_invariant=self.isopo_keep_small_invariant):
                     reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
                     if reg_factor == 0.0:
@@ -198,6 +185,13 @@ class DataParallelPPOActor(BasePPOActor):
                         return torch.sqrt(x.pow(2) + reg)
 
                 if self.isopo_nat:
+                    ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
+
+                    for i in range(len(seq_grads)):
+                        for j in range(i, len(seq_grads)):
+
+                            ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
+                            ntk[j, i] = ntk[i, j]
                     D, U = torch.linalg.eigh(ntk)
                     reg = self.isopo_nat_reg * self.batch_stats(f"isopo_nat_reg_{lname}", torch.mean(D))
                     preconditioner = reg / (D + reg + 1e-8)
@@ -227,10 +221,17 @@ class DataParallelPPOActor(BasePPOActor):
 
                 if hasattr(mod, "suppo_grad"):
 
+                    # Calculate normalized sequence gradients
+                    seq_grads_normed = [sg / (torch.norm(sg) + 1e-8) for sg in seq_grads]
+                    ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
+                    for i in range(len(seq_grads_normed)):
+                        for j in range(i, len(seq_grads_normed)):
+                            ntk[i, j] = torch.sum(seq_grads_normed[i] * seq_grads_normed[j])
+                            ntk[j, i] = ntk[i, j]
+
                     def project(acc_grad):
                         dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
-                        ntkn = ntk_normed
-                        inv = torch.linalg.inv(ntkn + 1e-2/len(seq_grads_normed) * torch.eye(len(seq_grads_normed), device=ntkn.device, dtype=ntkn.dtype))
+                        inv = torch.linalg.inv(ntk + 1e-2/len(seq_grads_normed) * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
                         weights = inv @ dot_products
                         result = torch.zeros_like(seq_grads[0])
 
