@@ -108,6 +108,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.pracc_relative_bound = self.config.get("pracc_relative_bound", 1.0)
         self.pracc_shrinkage = self.config.get("pracc_shrinkage", 1.0) # 1.0 means full pracc, 0.0 means no pracc
 
+        self.bypass_isopo_scaling = self.config.get("bypass_isopo_scaling", False)
+
         if self.isopo:
             self.install_isopo_hooks()
             self.reset_isopo_cache()
@@ -202,6 +204,10 @@ class DataParallelPPOActor(BasePPOActor):
                 else:
                     grad = 0.0
                     for i, (seq_grad, advantage) in enumerate(zip(seq_grads, self.seq_advantages)):
+
+                        if self.bypass_isopo_scaling:
+                            grad += advantage * seq_grad
+                            continue
 
                         overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
                         overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
