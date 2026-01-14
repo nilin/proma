@@ -175,11 +175,17 @@ class DataParallelPPOActor(BasePPOActor):
                     seq_grads.append(g_out_seq.T @ act_in_seq)
 
                 ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
+
                 for i in range(len(seq_grads)):
                     for j in range(i, len(seq_grads)):
+
                         ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
                         ntk[j, i] = ntk[i, j]
-                D, U = torch.linalg.eigh(ntk)
+
+                seq_grads_norms = [torch.norm(sg) for sg in seq_grads]
+                seq_grads_normed = [sg / (norm + 1e-8) for sg, norm in zip(seq_grads, seq_grads_norms)]
+                seq_grads_norms = torch.stack(seq_grads_norms)
+                ntk_normed = ntk / (seq_grads_norms[:, None] * seq_grads_norms[None, :] + 1e-8)
 
                 def add_reg_to_square(x, reg_factor, name, keep_small_invariant=self.isopo_keep_small_invariant):
                     reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
@@ -192,6 +198,7 @@ class DataParallelPPOActor(BasePPOActor):
                         return torch.sqrt(x.pow(2) + reg)
 
                 if self.isopo_nat:
+                    D, U = torch.linalg.eigh(ntk)
                     reg = self.isopo_nat_reg * self.batch_stats(f"isopo_nat_reg_{lname}", torch.mean(D))
                     preconditioner = reg / (D + reg + 1e-8)
                     advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
@@ -221,28 +228,27 @@ class DataParallelPPOActor(BasePPOActor):
                 if hasattr(mod, "suppo_grad"):
 
                     def project(acc_grad):
-                        dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads])
-                        inv = torch.linalg.inv(ntk + 1e-2 * (torch.trace(ntk)/len(seq_grads)) * torch.eye(len(seq_grads), device=ntk.device, dtype=ntk.dtype))
+                        dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
+                        ntkn = ntk_normed
+                        inv = torch.linalg.inv(ntkn + 1e-2/len(seq_grads_normed) * torch.eye(len(seq_grads_normed), device=ntkn.device, dtype=ntkn.dtype))
                         weights = inv @ dot_products
                         result = torch.zeros_like(seq_grads[0])
 
                         print(f"projection weights: {weights}")
-                        for w, sg in zip(weights, seq_grads):
+                        for w, sg in zip(weights, seq_grads_normed):
                             result = result + w * sg
                         return result
 
                     projected_grad = project(mod.suppo_grad)
 
-                    ratio = torch.norm(projected_grad) / (torch.norm(grad) + 1e-8)
-                    if ratio > self.pracc_relative_bound:
-                        adjust = self.pracc_relative_bound / (ratio + 1e-8)
-                    else:
-                        adjust = 1.0
+                    abs_bound = torch.norm(grad) * self.pracc_relative_bound
+                    if torch.norm(projected_grad) > abs_bound:
+                        projected_grad = projected_grad * abs_bound / (torch.norm(projected_grad) + 1e-8)
 
-                    print(f"ratio: {ratio}")
-                    print(f"adjust: {adjust}")
+                    print(f"grad: {torch.norm(grad)}")
+                    print(f"projected_grad: {torch.norm(projected_grad)}")
 
-                    mod.suppo_grad = mod.suppo_grad - self.pracc_shrinkage * adjust * projected_grad + grad
+                    mod.suppo_grad = mod.suppo_grad - self.pracc_shrinkage * projected_grad + grad
                 else:
                     mod.suppo_grad = grad
 
