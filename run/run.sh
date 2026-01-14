@@ -86,30 +86,19 @@ lr=actor_rollout_ref.actor.optim.lr
 # non-interacting isopo
 switch-alg \
     $pure \
-    trainer.total_training_steps=102 \
+    trainer.total_training_steps=302 \
     +actor_rollout_ref.actor.use_isopo=True \
-    trainer.experiment_name=isopo-overlap-1 \
-    +actor_rollout_ref.actor.isopo_overlap_neg_power=1.0 \
+    trainer.experiment_name=pracc-1.0 \
+    +actor_rollout_ref.actor.isopo_overlap_neg_power=0.0 \
     +actor_rollout_ref.actor.isopo_norm_neg_power=0.0 \
     +actor_rollout_ref.actor.isopo_rel_overlap_neg_power=0.0 \
     +actor_rollout_ref.actor.isopo_overlap_reg=0.0 \
     +actor_rollout_ref.actor.isopo_norm_reg=0.0 \
     +actor_rollout_ref.actor.isopo_rel_overlap_reg=0.0 \
-    +actor_rollout_ref.actor.isopo_reduce_projection=1.0 \
-    +actor_rollout_ref.actor.isopo_reduced_overlap_reg=0.0 \
-    +actor_rollout_ref.actor.isopo_reduced_overlap_neg_power=0.0 \
+    +actor_rollout_ref.actor.pracc_shrinkage=1.0 \
+    +actor_rollout_ref.actor.pracc_relative_bound=1.0 \
     +actor_rollout_ref.actor.isopo_keep_small_invariant=False \
-    +actor_rollout_ref.actor.override_pg_loss=True 
-
-# interacting isopo
-switch-alg \
-    $pure \
-    trainer.total_training_steps=102 \
-    +actor_rollout_ref.actor.use_isopo=True \
-    +actor_rollout_ref.actor.isopo_nat=True \
-    +actor_rollout_ref.actor.isopo_nat_reg=1.0 \
-    trainer.experiment_name=isopo-seq-nat-batch \
-    +actor_rollout_ref.actor.override_pg_loss=True 
+    +actor_rollout_ref.actor.override_pg_loss=False 
 
 
 bash run/next.sh
