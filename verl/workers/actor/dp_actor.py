@@ -101,13 +101,12 @@ class DataParallelPPOActor(BasePPOActor):
         self.isopo_overlap_reg = self.config.get("isopo_overlap_reg", 1.0)
         self.isopo_norm_reg = self.config.get("isopo_norm_reg", 1.0)
         self.isopo_nat_reg = self.config.get("isopo_nat_reg", 1.0)
-        self.isopo_reduced_overlap_reg = self.config.get("isopo_reduced_overlap_reg", 1.0)
-        self.isopo_reduced_overlap_neg_power = self.config.get("isopo_reduced_overlap_neg_power", 0.0)
 
         self.override_pg_loss = self.config.get("override_pg_loss", False)
         self.isopo_keep_small_invariant = self.config.get("isopo_keep_small_invariant", True)
         self.isopo_nat = self.config.get("isopo_nat", False)
-        self.isopo_reduce_projection = self.config.get("isopo_reduce_projection", 1.0)
+        self.pracc_relative_bound = self.config.get("pracc_relative_bound", 1.0)
+        self.pracc_shrinkage = self.config.get("pracc_shrinkage", 1.0) # 1.0 means full pracc, 0.0 means no pracc
 
         if self.isopo:
             self.install_isopo_hooks()
@@ -232,12 +231,18 @@ class DataParallelPPOActor(BasePPOActor):
                             result = result + w * sg
                         return result
 
-                    reduced_overlap = torch.sum(mod.suppo_grad * grad) / torch.norm(mod.suppo_grad + 0.0 * grad)
-                    reduced_overlap_reg = add_reg_to_square(reduced_overlap, self.isopo_reduced_overlap_reg, "reduced_overlap")
-                    reduced_scaling = (reduced_overlap_reg / (reduced_overlap + reduced_overlap_reg + 1e-8)).pow(self.isopo_reduced_overlap_neg_power)
+                    projected_grad = project(mod.suppo_grad)
 
-                    print(f"reduced_scaling: {reduced_scaling.item()}")
-                    mod.suppo_grad = mod.suppo_grad + (self.isopo_reduce_projection - 1.0) * project(mod.suppo_grad) + grad * reduced_scaling
+                    ratio = torch.norm(projected_grad) / (torch.norm(grad) + 1e-8)
+                    if ratio > self.pracc_relative_bound:
+                        adjust = self.pracc_relative_bound / (ratio + 1e-8)
+                    else:
+                        adjust = 1.0
+
+                    print(f"ratio: {ratio.item()}")
+                    print(f"adjust: {adjust.item()}")
+
+                    mod.suppo_grad = mod.suppo_grad - self.pracc_shrinkage * adjust * projected_grad + grad
                 else:
                     mod.suppo_grad = grad
 

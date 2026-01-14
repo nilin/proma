@@ -118,13 +118,12 @@ class ActorConfig(BaseConfig):
     isopo_rel_overlap_neg_power: float = 0.0
     isopo_rel_overlap_reg: float = 0.0
     isopo_overlap_reg: float = 0.0
-    isopo_reduced_overlap_reg: float = 1.0
-    isopo_reduced_overlap_neg_power: float = 0.0
     isopo_keep_small_invariant: bool = True
     isopo_norm_reg: float = 0.0
     isopo_nat_reg: float = 1.0
     isopo_nat: bool = False
-    isopo_reduce_projection: float = 1.0
+    pracc_relative_bound: float = 1.0
+    pracc_shrinkage: float = 1.0
     override_pg_loss: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False
