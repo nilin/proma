@@ -285,6 +285,8 @@ class DataParallelPPOActor(BasePPOActor):
             return value
 
     def update_batch_stats(self, ema_decay: float = 0.9):
+        if not hasattr(self, "current_batch_stats"):
+            return
         for name, values in self.current_batch_stats.items():
             current_value = torch.mean(torch.stack(values))
             if name not in self.done_batch_stats:
