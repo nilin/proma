@@ -231,7 +231,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                     def project(acc_grad):
                         dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
-                        inv = torch.linalg.inv(ntk + 1e-2/len(seq_grads_normed) * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
+                        inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
                         weights = inv @ dot_products
                         result = torch.zeros_like(seq_grads[0])
 
