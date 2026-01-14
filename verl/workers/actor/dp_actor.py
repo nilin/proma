@@ -239,8 +239,8 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         adjust = 1.0
 
-                    print(f"ratio: {ratio.item()}")
-                    print(f"adjust: {adjust.item()}")
+                    print(f"ratio: {ratio}")
+                    print(f"adjust: {adjust}")
 
                     mod.suppo_grad = mod.suppo_grad - self.pracc_shrinkage * adjust * projected_grad + grad
                 else:
