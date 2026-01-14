@@ -234,8 +234,9 @@ class DataParallelPPOActor(BasePPOActor):
 
                     if self.quick_ntk:
                         def project_to_complement(acc_grad):
-                            for sg in seq_grads_normed:
-                                acc_grad = acc_grad - torch.sum(acc_grad*sg) * sg
+                            for _ in range(3):
+                                for sg in seq_grads_normed:
+                                    acc_grad = acc_grad - torch.sum(acc_grad*sg) * sg
                             return acc_grad
 
                         projected_grad = suppo_grad - project_to_complement(suppo_grad)
