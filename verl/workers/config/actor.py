@@ -122,6 +122,7 @@ class ActorConfig(BaseConfig):
     isopo_norm_reg: float = 0.0
     isopo_nat_reg: float = 1.0
     isopo_nat: bool = False
+    quick_ntk: bool = False
     bypass_isopo_scaling: bool = False
     pracc_relative_bound: float = 1.0
     pracc_shrinkage: float = 1.0

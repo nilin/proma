@@ -107,6 +107,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.isopo_nat = self.config.get("isopo_nat", False)
         self.pracc_relative_bound = self.config.get("pracc_relative_bound", 1.0)
         self.pracc_shrinkage = self.config.get("pracc_shrinkage", 1.0) # 1.0 means full pracc, 0.0 means no pracc
+        self.quick_ntk = self.config.get("quick_ntk", False) # use fast Gram-Schmidt approximation instead of full NTK inverse
 
         self.bypass_isopo_scaling = self.config.get("bypass_isopo_scaling", False)
 
@@ -229,24 +230,34 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # Calculate normalized sequence gradients
                     seq_grads_normed = [sg / (torch.norm(sg) + 1e-8) for sg in seq_grads]
-                    ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
-                    for i in range(len(seq_grads_normed)):
-                        for j in range(i, len(seq_grads_normed)):
-                            ntk[i, j] = torch.sum(seq_grads_normed[i] * seq_grads_normed[j])
-                            ntk[j, i] = ntk[i, j]
 
-                    def project(acc_grad):
-                        dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
-                        inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
-                        weights = inv @ dot_products
-                        result = torch.zeros_like(seq_grads[0])
+                    if self.quick_ntk:
+                        def project_to_complement(acc_grad):
+                            for sg in seq_grads_normed:
+                                acc_grad = acc_grad - torch.sum(acc_grad*sg) * sg
+                            return acc_grad
 
-                        print(f"projection weights: {weights}")
-                        for w, sg in zip(weights, seq_grads_normed):
-                            result = result + w * sg
-                        return result
+                        projected_grad = mod.suppo_grad - project_to_complement(mod.suppo_grad)
 
-                    projected_grad = project(mod.suppo_grad)
+                    else:
+                        ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
+                        for i in range(len(seq_grads_normed)):
+                            for j in range(i, len(seq_grads_normed)):
+                                ntk[i, j] = torch.sum(seq_grads_normed[i] * seq_grads_normed[j])
+                                ntk[j, i] = ntk[i, j]
+
+                        def project(acc_grad):
+                            dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
+                            inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
+                            weights = inv @ dot_products
+                            result = torch.zeros_like(seq_grads[0])
+
+                            print(f"projection weights: {weights}")
+                            for w, sg in zip(weights, seq_grads_normed):
+                                result = result + w * sg
+                            return result
+
+                        projected_grad = project(mod.suppo_grad)
 
                     abs_bound = torch.norm(grad) * self.pracc_relative_bound
                     if torch.norm(projected_grad) > abs_bound:

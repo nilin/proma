@@ -99,7 +99,8 @@ switch-alg \
     +actor_rollout_ref.actor.pracc_relative_bound=1.0 \
     +actor_rollout_ref.actor.isopo_keep_small_invariant=False \
     +actor_rollout_ref.actor.override_pg_loss=False \
-    +actor_rollout_ref.actor.bypass_isopo_scaling=True 
+    +actor_rollout_ref.actor.bypass_isopo_scaling=True \
+    +actor_rollout_ref.actor.quick_ntk=True 
 
 
 bash run/next.sh
