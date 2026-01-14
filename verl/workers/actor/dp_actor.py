@@ -227,6 +227,7 @@ class DataParallelPPOActor(BasePPOActor):
                         grad += scaling * seq_grad 
 
                 if hasattr(mod, "suppo_grad"):
+                    suppo_grad = mod.suppo_grad
 
                     # Calculate normalized sequence gradients
                     seq_grads_normed = [sg / (torch.norm(sg) + 1e-8) for sg in seq_grads]
@@ -237,7 +238,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 acc_grad = acc_grad - torch.sum(acc_grad*sg) * sg
                             return acc_grad
 
-                        projected_grad = mod.suppo_grad - project_to_complement(mod.suppo_grad)
+                        projected_grad = suppo_grad - project_to_complement(suppo_grad)
 
                     else:
                         ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
@@ -257,7 +258,7 @@ class DataParallelPPOActor(BasePPOActor):
                                 result = result + w * sg
                             return result
 
-                        projected_grad = project(mod.suppo_grad)
+                        projected_grad = project(suppo_grad)
 
                     abs_bound = torch.norm(grad) * self.pracc_relative_bound
                     if torch.norm(projected_grad) > abs_bound:
@@ -266,7 +267,7 @@ class DataParallelPPOActor(BasePPOActor):
                     print(f"grad: {torch.norm(grad)}")
                     print(f"projected_grad: {torch.norm(projected_grad)}")
 
-                    mod.suppo_grad = mod.suppo_grad - self.pracc_shrinkage * projected_grad + grad
+                    mod.suppo_grad = suppo_grad - self.pracc_shrinkage * projected_grad + grad
                 else:
                     mod.suppo_grad = grad
 
