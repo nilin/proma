@@ -83,27 +83,56 @@ sgd="actor_rollout_ref.actor.optim.optimizer=SGD actor_rollout_ref.actor.optim.o
 
 lr=actor_rollout_ref.actor.optim.lr
 
-# non-interacting isopo
-switch-alg \
-    $pure \
-    trainer.total_training_steps=302 \
-    +actor_rollout_ref.actor.use_isopo=True \
-    trainer.experiment_name=pracc-1.0 \
-    +actor_rollout_ref.actor.isopo_overlap_neg_power=0.0 \
-    +actor_rollout_ref.actor.isopo_norm_neg_power=0.0 \
-    +actor_rollout_ref.actor.isopo_rel_overlap_neg_power=0.0 \
-    +actor_rollout_ref.actor.isopo_overlap_reg=0.0 \
-    +actor_rollout_ref.actor.isopo_norm_reg=0.0 \
-    +actor_rollout_ref.actor.isopo_rel_overlap_reg=0.0 \
-    +actor_rollout_ref.actor.pracc_shrinkage=1.0 \
-    +actor_rollout_ref.actor.pracc_relative_bound=1.0 \
-    +actor_rollout_ref.actor.isopo_keep_small_invariant=False \
-    +actor_rollout_ref.actor.override_pg_loss=False \
-    +actor_rollout_ref.actor.bypass_isopo_scaling=True \
-    +actor_rollout_ref.actor.quick_ntk=True 
 
+
+reinforce () {
+    # $pure makes it REINFORCE, i.e. no likelihood ratio clipping
+
+    switch-alg \
+        $pure \
+        trainer.total_training_steps=302 \
+        trainer.experiment_name=pracc-1.0 \
+        +actor_rollout_ref.actor.isopo_overlap_neg_power=0.0 \
+        +actor_rollout_ref.actor.isopo_norm_neg_power=0.0 \
+        +actor_rollout_ref.actor.isopo_rel_overlap_neg_power=0.0 \
+        +actor_rollout_ref.actor.isopo_overlap_reg=0.0 \
+        +actor_rollout_ref.actor.isopo_norm_reg=0.0 \
+        +actor_rollout_ref.actor.isopo_rel_overlap_reg=0.0 \
+        +actor_rollout_ref.actor.isopo_keep_small_invariant=False \
+        +actor_rollout_ref.actor.override_pg_loss=False \
+        +actor_rollout_ref.actor.bypass_isopo_scaling=True \
+        +actor_rollout_ref.actor.quick_ntk=True \
+	$@
+
+        #+actor_rollout_ref.actor.use_isopo=True \
+}
+
+
+
+# PROMA
+####################################################################################################
+# The actual PROMA-related settings are:
+# +actor_rollout_ref.actor.pracc_shrinkage=1.0 \
+# +actor_rollout_ref.actor.pracc_relative_bound=0.5 \
+
+reinforce () {
+    +actor_rollout_ref.actor.use_isopo=True \
+    +actor_rollout_ref.actor.pracc_shrinkage=1.0 \
+    +actor_rollout_ref.actor.pracc_relative_bound=0.5 \
+    trainer.experiment_name=proma
+}
+
+# no PROMA (REINFORCE)
+####################################################################################################
+
+reinforce () {
+    +actor_rollout_ref.actor.use_isopo=False \
+    trainer.experiment_name=reinforce
+}
+
+
+####################################################################################################
 
 bash run/next.sh
 
 
-#    +actor_rollout_ref.actor.override_pg_loss=True 
