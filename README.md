@@ -1,4 +1,4 @@
-# ISOPO: Proximal policy gradients without pi-old
+# Projected Microbatch Accumulation yields reference-free proximal policy updates
 
 **Nilin Abrahamsen**
 
