@@ -1,4 +1,4 @@
-# Projected Microbatch Accumulation for reference-free PPO
+# Projected Microbatch Accumulation yields reference-free PPO
 
 **Nilin Abrahamsen**
 
