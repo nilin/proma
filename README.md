@@ -1,4 +1,4 @@
-# Projected Microbatch Accumulation yields reference-free proximal policy updates
+# Projected Microbatch Accumulation for reference-free PPO
 
 **Nilin Abrahamsen**
 
