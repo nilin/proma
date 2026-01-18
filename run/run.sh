@@ -56,6 +56,9 @@ run-alg () {
         trainer.resume_mode=disable \
         trainer.val_before_train=True \
         actor_rollout_ref.actor.optim.lr=2e-6 \
+        +actor_rollout_ref.actor.isopo_keep_small_invariant=False \
+        +actor_rollout_ref.actor.bypass_isopo_scaling=True \
+        +actor_rollout_ref.actor.quick_ntk=True \
         $pure \
         "$@"
 }
