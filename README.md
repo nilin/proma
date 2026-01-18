@@ -3,15 +3,12 @@
 **Nilin Abrahamsen**
 
 
-This repo contains a demonstration of the ISOPO isometric policy gradient (https://arxiv.org/abs/2512.23353). This demonstration is a fork of [VeRL](https://github.com/volcengine/verl).
+This repo contains a demonstration of the Projected Microbatch Accumulation (PROMA), [arxiv:2601.10498](https://arxiv.org/abs/2601.10498). This demonstration is a fork of [VeRL](https://github.com/volcengine/verl).
+
+Projected Microbatch Accumulation (PROMA) is a proximal policy update method for large language model fine-tuning. PROMA accumulates policy gradients across microbatches by projecting out sequence-wise gradient components before microbatch aggregation. The projection is applied layer-wise during the backward pass, enabling efficient implementation without additional forward or backward passes. Empirically, PROMA enforces tighter control of local KL divergence than GRPO, resulting in more stable policy learning. Unlike PPO and GRPO, PROMA achieves proximal updates without inducing entropy collapse and does not rely on a reference policy or likelihood-ratio clipping.
 
 
-Isometric Policy Optimization (ISOPO) is an efficient method to approximate the natural policy gradient in a single gradient step. In comparison, existing proximal policy methods such as PPO, GRPO, GSPO, or CISPO use multiple gradient steps with variants of importance ratio clipping to approximate a natural gradient step relative to a reference policy. In its simplest form, ISOPO normalizes the log-probability gradient of each sequence in the Fisher metric before contracting with the advantages. Another variant of ISOPO transforms the microbatch advantages based on the neural tangent kernel in each layer. ISOPO applies this transformation layer-wise in a single backward pass and can be implemented with negligible computational overhead compared to vanilla REINFORCE.
-
-
-<img width="948" height="388" alt="image" src="isopo/rectangle.png" />
-
-The implementation of ISOPO is in https://github.com/nilin/isopo/blob/main/verl/workers/actor/dp_actor.py
+The implementation of PROMA (and [ISOPO](https://arxiv.org/abs/2512.23353)) are in https://github.com/nilin/isopo/blob/main/verl/workers/actor/dp_actor.py
 
 - [setup example](setup.sh)
 - [run script example](run/run.sh)
