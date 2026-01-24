@@ -90,7 +90,7 @@ class DataParallelPPOActor(BasePPOActor):
         # ISOPO hooks
         #########################################################
 
-        self.isopo = self.config.get("use_isopo", False)
+        self.isopo = self.config.get("use_proma_isopo", False)
         self.testing = self.config.get("isopo_testing", False)
 
         self.isopo_norm_neg_power = self.config.get("isopo_norm_neg_power", 0.0)
@@ -105,8 +105,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.override_pg_loss = self.config.get("override_pg_loss", False)
         self.isopo_keep_small_invariant = self.config.get("isopo_keep_small_invariant", True)
         self.isopo_nat = self.config.get("isopo_nat", False)
-        self.pracc_relative_bound = self.config.get("pracc_relative_bound", 1.0)
-        self.pracc_shrinkage = self.config.get("pracc_shrinkage", 1.0) # 1.0 means full pracc, 0.0 means no pracc
+        self.proma_relative_bound = self.config.get("proma_relative_bound", 1.0)
+        self.proma_shrinkage = self.config.get("proma_shrinkage", 1.0) # 1.0 means full proma, 0.0 means no proma
         self.quick_ntk = self.config.get("quick_ntk", False) # use fast Gram-Schmidt approximation instead of full NTK inverse
 
         self.bypass_isopo_scaling = self.config.get("bypass_isopo_scaling", False)
@@ -261,14 +261,14 @@ class DataParallelPPOActor(BasePPOActor):
 
                         projected_grad = project(suppo_grad)
 
-                    abs_bound = torch.norm(grad) * self.pracc_relative_bound
+                    abs_bound = torch.norm(grad) * self.proma_relative_bound
                     if torch.norm(projected_grad) > abs_bound:
                         projected_grad = projected_grad * abs_bound / (torch.norm(projected_grad) + 1e-8)
 
                     print(f"grad: {torch.norm(grad)}")
                     print(f"projected_grad: {torch.norm(projected_grad)}")
 
-                    mod.suppo_grad = suppo_grad - self.pracc_shrinkage * projected_grad + grad
+                    mod.suppo_grad = suppo_grad - self.proma_shrinkage * projected_grad + grad
                 else:
                     mod.suppo_grad = grad
 

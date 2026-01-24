@@ -64,9 +64,9 @@ run-alg () {
         "$@"
 }
 
-reinforce () { run-alg +actor_rollout_ref.actor.use_isopo=False trainer.experiment_name=reinforce "$@"; }
-grpo () { run-alg +actor_rollout_ref.actor.use_isopo=False $ppo trainer.experiment_name=grpo "$@"; }
-proma () { run-alg +actor_rollout_ref.actor.use_isopo=True +actor_rollout_ref.actor.pracc_shrinkage=1.0 +actor_rollout_ref.actor.pracc_relative_bound=0.5 trainer.experiment_name=proma "$@"; }
+reinforce () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.experiment_name=reinforce "$@"; }
+grpo () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False $ppo trainer.experiment_name=grpo "$@"; }
+proma () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 +actor_rollout_ref.actor.proma_relative_bound=0.5 trainer.experiment_name=proma "$@"; }
 
 bash run/next.sh
 

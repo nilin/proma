@@ -111,7 +111,7 @@ class ActorConfig(BaseConfig):
     kl_loss_coef: float = 0.001
     kl_loss_type: str = "low_var_kl"
     # Enable ISOPO hooks in the actor implementation when True
-    use_isopo: bool = False
+    use_proma_isopo: bool = False
     isopo_testing: bool = False
     isopo_norm_neg_power: float = 0.0
     isopo_overlap_neg_power: float = 0.0
@@ -124,8 +124,8 @@ class ActorConfig(BaseConfig):
     isopo_nat: bool = False
     quick_ntk: bool = False
     bypass_isopo_scaling: bool = False
-    pracc_relative_bound: float = 1.0
-    pracc_shrinkage: float = 1.0
+    proma_relative_bound: float = 1.0
+    proma_shrinkage: float = 1.0
     override_pg_loss: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False
