@@ -2,6 +2,7 @@
 
 # pure means no clipping, i.e. reinforce and not ppo
 pure="actor_rollout_ref.actor.clip_ratio=1e9 actor_rollout_ref.actor.clip_ratio_high=1e9 actor_rollout_ref.actor.clip_ratio_low=1e9 actor_rollout_ref.actor.clip_ratio_c=1e9"
+ppo="actor_rollout_ref.actor.clip_ratio=0.2 actor_rollout_ref.actor.clip_ratio_high=0.2 actor_rollout_ref.actor.clip_ratio_low=0.2 actor_rollout_ref.actor.clip_ratio_c=3"
 test="trainer.val_before_train=False trainer.project_name=test-suppo data.train_batch_size=16 actor_rollout_ref.actor.ppo_mini_batch_size=16"
 sgd="actor_rollout_ref.actor.optim.optimizer=SGD actor_rollout_ref.actor.optim.optimizer_impl=torch.optim actor_rollout_ref.actor.optim.lr=0.01"
 lr=actor_rollout_ref.actor.optim.lr
@@ -64,6 +65,7 @@ run-alg () {
 }
 
 reinforce () { run-alg +actor_rollout_ref.actor.use_isopo=False trainer.experiment_name=reinforce "$@"; }
+grpo () { run-alg +actor_rollout_ref.actor.use_isopo=False $ppo trainer.experiment_name=grpo "$@"; }
 proma () { run-alg +actor_rollout_ref.actor.use_isopo=True +actor_rollout_ref.actor.pracc_shrinkage=1.0 +actor_rollout_ref.actor.pracc_relative_bound=0.5 trainer.experiment_name=proma "$@"; }
 
 bash run/next.sh
