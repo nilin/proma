@@ -108,6 +108,10 @@ class DataParallelPPOActor(BasePPOActor):
         self.proma_relative_bound = self.config.get("proma_relative_bound", 1.0)
         self.proma_shrinkage = self.config.get("proma_shrinkage", 1.0) # 1.0 means full proma, 0.0 means no proma
         self.quick_ntk = self.config.get("quick_ntk", False) # use fast Gram-Schmidt approximation instead of full NTK inverse
+        self.proma_intra = self.config.get("proma_intra", False)
+        self.proma_intra_dim = self.config.get("proma_intra_dim", 30)
+        self.proma_intra_use_same = self.config.get("proma_intra_use_same", False)
+        self.proma_intra_from_accumulated = self.config.get("proma_intra_from_accumulated", False)
 
         self.bypass_isopo_scaling = self.config.get("bypass_isopo_scaling", False)
 
@@ -225,6 +229,47 @@ class DataParallelPPOActor(BasePPOActor):
                         scaling = scaling_factor * advantage
 
                         grad += scaling * seq_grad 
+
+                if self.proma_intra:
+                    # Project out g_i a_i^T from the gradient, accounting for overlaps
+                    k = min(self.proma_intra_dim, act_in.shape[0])
+                    perm_a = torch.randperm(act_in.shape[0], device=act_in.device)[:k]
+                    if self.proma_intra_use_same:
+                        perm_g = perm_a
+                    else:
+                        perm_g = torch.randperm(g_out.shape[0], device=g_out.device)[:k]
+
+                    a_sampled = act_in[perm_a]  # (k, d_in)
+                    g_sampled = g_out[perm_g]   # (k, d_out)
+
+                    # Choose which gradient to project from
+                    if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                        G = mod.suppo_grad
+                    else:
+                        G = grad
+
+                    # Compute Gram matrix: K_ij = <g_i a_i^T, g_j a_j^T>_F = (g_i^T g_j)(a_i^T a_j)
+                    K_g = g_sampled @ g_sampled.T  # (k, k)
+                    K_a = a_sampled @ a_sampled.T  # (k, k)
+                    K = K_g * K_a  # element-wise product (k, k)
+
+                    # Compute RHS: b_i = <G, g_i a_i^T>_F = g_i^T G a_i
+                    Ga = G @ a_sampled.T  # (d_out, k)
+                    b = (g_sampled * Ga.T).sum(dim=1)  # (k,)
+
+                    # Solve K @ alpha = b with regularization scaled to the matrix
+                    diag_mean = torch.mean(torch.diag(K))
+                    K_reg = K + 1e-2 * diag_mean * torch.eye(k, device=K.device, dtype=K.dtype)
+                    alpha = torch.linalg.solve(K_reg, b)  # (k,)
+
+                    # Build projection: P = sum_i alpha_i * g_i a_i^T = g_sampled.T @ (alpha[:, None] * a_sampled)
+                    projection = g_sampled.T @ (alpha[:, None] * a_sampled)  # (d_out, d_in)
+
+                    # Project out from the appropriate gradient
+                    if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                        mod.suppo_grad = mod.suppo_grad - projection
+                    else:
+                        grad = grad - projection
 
                 if hasattr(mod, "suppo_grad"):
                     suppo_grad = mod.suppo_grad

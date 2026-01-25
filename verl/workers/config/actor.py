@@ -126,6 +126,10 @@ class ActorConfig(BaseConfig):
     bypass_isopo_scaling: bool = False
     proma_relative_bound: float = 1.0
     proma_shrinkage: float = 1.0
+    proma_intra: bool = False
+    proma_intra_dim: int = 30
+    proma_intra_use_same: bool = False
+    proma_intra_from_accumulated: bool = False
     override_pg_loss: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False
