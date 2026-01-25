@@ -105,8 +105,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.override_pg_loss = self.config.get("override_pg_loss", False)
         self.isopo_keep_small_invariant = self.config.get("isopo_keep_small_invariant", True)
         self.isopo_nat = self.config.get("isopo_nat", False)
-        self.proma_relative_bound = self.config.get("proma_relative_bound", 1.0)
-        self.proma_shrinkage = self.config.get("proma_shrinkage", 1.0) # 1.0 means full proma, 0.0 means no proma
+        self.proma_relative_bound = self.config.get("proma_relative_bound", 0.5)
+        self.proma_shrinkage = self.config.get("proma_shrinkage", 0.0) # 1.0 means full proma, 0.0 means no proma
         self.quick_ntk = self.config.get("quick_ntk", False) # use fast Gram-Schmidt approximation instead of full NTK inverse
         self.proma_intra = self.config.get("proma_intra", False)
         self.proma_intra_dim = self.config.get("proma_intra_dim", 30)
@@ -253,67 +253,75 @@ class DataParallelPPOActor(BasePPOActor):
                     K_a = a_sampled @ a_sampled.T  # (k, k)
                     K = K_g * K_a  # element-wise product (k, k)
 
-                    # Compute RHS: b_i = <G, g_i a_i^T>_F = g_i^T G a_i
-                    Ga = G @ a_sampled.T  # (d_out, k)
-                    b = (g_sampled * Ga.T).sum(dim=1)  # (k,)
+                    if not (isinstance(G, float) and G == 0.0):
+                        # Compute RHS: b_i = <G, g_i a_i^T>_F = g_i^T G a_i
+                        Ga = G @ a_sampled.T  # (d_out, k)
+                        b = (g_sampled * Ga.T).sum(dim=1)  # (k,)
 
-                    # Solve K @ alpha = b with regularization scaled to the matrix
-                    diag_mean = torch.mean(torch.diag(K))
-                    K_reg = K + 1e-2 * diag_mean * torch.eye(k, device=K.device, dtype=K.dtype)
-                    alpha = torch.linalg.solve(K_reg, b)  # (k,)
+                        # Solve K @ alpha = b with regularization scaled to the matrix
+                        diag_mean = torch.mean(torch.diag(K))
+                        K_reg = K + 1e-2 * diag_mean * torch.eye(k, device=K.device, dtype=K.dtype)
+                        alpha = torch.linalg.solve(K_reg, b)  # (k,)
 
-                    # Build projection: P = sum_i alpha_i * g_i a_i^T = g_sampled.T @ (alpha[:, None] * a_sampled)
-                    projection = g_sampled.T @ (alpha[:, None] * a_sampled)  # (d_out, d_in)
+                        # Build projection: P = sum_i alpha_i * g_i a_i^T = g_sampled.T @ (alpha[:, None] * a_sampled)
+                        projection = g_sampled.T @ (alpha[:, None] * a_sampled)  # (d_out, d_in)
 
-                    # Project out from the appropriate gradient
-                    if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
-                        mod.suppo_grad = mod.suppo_grad - projection
-                    else:
-                        grad = grad - projection
+                        # Project out from the appropriate gradient
+                        if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                            mod.suppo_grad = mod.suppo_grad - projection
+                        else:
+                            grad = grad - projection
 
                 if hasattr(mod, "suppo_grad"):
                     suppo_grad = mod.suppo_grad
 
-                    # Calculate normalized sequence gradients
-                    seq_grads_normed = [sg / (torch.norm(sg) + 1e-8) for sg in seq_grads]
+                    if self.proma_shrinkage > 0.0:
+                        # Calculate normalized sequence gradients
+                        seq_grads_normed = [sg / (torch.norm(sg) + 1e-8) for sg in seq_grads]
 
-                    if self.quick_ntk:
-                        def project_to_complement(acc_grad):
-                            for _ in range(2):
-                                for sg in seq_grads_normed:
-                                    acc_grad = acc_grad - torch.sum(acc_grad*sg) * sg
-                            return acc_grad
+                        if self.quick_ntk:
+                            def project_to_complement(acc_grad):
+                                for _ in range(2):
+                                    for sg in seq_grads_normed:
+                                        acc_grad = acc_grad - torch.sum(acc_grad*sg) * sg
+                                return acc_grad
 
-                        projected_grad = suppo_grad - project_to_complement(suppo_grad)
+                            projected_grad = suppo_grad - project_to_complement(suppo_grad)
 
+                        else:
+                            ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
+                            for i in range(len(seq_grads_normed)):
+                                for j in range(i, len(seq_grads_normed)):
+                                    ntk[i, j] = torch.sum(seq_grads_normed[i] * seq_grads_normed[j])
+                                    ntk[j, i] = ntk[i, j]
+
+                            def project(acc_grad):
+                                dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
+                                inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
+                                weights = inv @ dot_products
+                                result = torch.zeros_like(seq_grads[0])
+
+                                print(f"projection weights: {weights}")
+                                for w, sg in zip(weights, seq_grads_normed):
+                                    result = result + w * sg
+                                return result
+
+                            projected_grad = project(suppo_grad)
+
+                        abs_bound = torch.norm(grad) * self.proma_relative_bound
+                        if torch.norm(projected_grad) > abs_bound:
+                            projected_grad = projected_grad * abs_bound / (torch.norm(projected_grad) + 1e-8)
+
+                        print(f"grad: {torch.norm(grad)}")
+                        print(f"projected_grad: {torch.norm(projected_grad)}")
+
+                        mod.suppo_grad = suppo_grad - self.proma_shrinkage * projected_grad + grad
+
+                    # else no proma
                     else:
-                        ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
-                        for i in range(len(seq_grads_normed)):
-                            for j in range(i, len(seq_grads_normed)):
-                                ntk[i, j] = torch.sum(seq_grads_normed[i] * seq_grads_normed[j])
-                                ntk[j, i] = ntk[i, j]
+                        mod.suppo_grad = suppo_grad + grad
 
-                        def project(acc_grad):
-                            dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
-                            inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
-                            weights = inv @ dot_products
-                            result = torch.zeros_like(seq_grads[0])
-
-                            print(f"projection weights: {weights}")
-                            for w, sg in zip(weights, seq_grads_normed):
-                                result = result + w * sg
-                            return result
-
-                        projected_grad = project(suppo_grad)
-
-                    abs_bound = torch.norm(grad) * self.proma_relative_bound
-                    if torch.norm(projected_grad) > abs_bound:
-                        projected_grad = projected_grad * abs_bound / (torch.norm(projected_grad) + 1e-8)
-
-                    print(f"grad: {torch.norm(grad)}")
-                    print(f"projected_grad: {torch.norm(projected_grad)}")
-
-                    mod.suppo_grad = suppo_grad - self.proma_shrinkage * projected_grad + grad
+                # else first microbatch
                 else:
                     mod.suppo_grad = grad
 
