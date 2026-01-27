@@ -112,6 +112,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.proma_intra_dim = self.config.get("proma_intra_dim", 30)
         self.proma_intra_use_same = self.config.get("proma_intra_use_same", False)
         self.proma_intra_from_accumulated = self.config.get("proma_intra_from_accumulated", False)
+        self.proma_intra_linear_combo = self.config.get("proma_intra_linear_combo", False)
+        self.proma_intra_shrinkage = self.config.get("proma_intra_shrinkage", 1.0)
 
         self.bypass_isopo_scaling = self.config.get("bypass_isopo_scaling", False)
 
@@ -233,14 +235,26 @@ class DataParallelPPOActor(BasePPOActor):
                 if self.proma_intra:
                     # Project out g_i a_i^T from the gradient, accounting for overlaps
                     k = min(self.proma_intra_dim, act_in.shape[0])
-                    perm_a = torch.randperm(act_in.shape[0], device=act_in.device)[:k]
-                    if self.proma_intra_use_same:
-                        perm_g = perm_a
-                    else:
-                        perm_g = torch.randperm(g_out.shape[0], device=g_out.device)[:k]
+                    n = act_in.shape[0]
 
-                    a_sampled = act_in[perm_a]  # (k, d_in)
-                    g_sampled = g_out[perm_g]   # (k, d_out)
+                    if self.proma_intra_linear_combo:
+                        # Use random linear combinations via Gaussian projection
+                        P_a = torch.randn(k, n, device=act_in.device, dtype=act_in.dtype) / math.sqrt(n)
+                        if self.proma_intra_use_same:
+                            P_g = P_a
+                        else:
+                            P_g = torch.randn(k, n, device=g_out.device, dtype=g_out.dtype) / math.sqrt(n)
+                        a_sampled = P_a @ act_in  # (k, d_in)
+                        g_sampled = P_g @ g_out   # (k, d_out)
+                    else:
+                        # Use random subset of rows
+                        perm_a = torch.randperm(n, device=act_in.device)[:k]
+                        if self.proma_intra_use_same:
+                            perm_g = perm_a
+                        else:
+                            perm_g = torch.randperm(n, device=g_out.device)[:k]
+                        a_sampled = act_in[perm_a]  # (k, d_in)
+                        g_sampled = g_out[perm_g]   # (k, d_out)
 
                     # Choose which gradient to project from
                     if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
@@ -268,9 +282,9 @@ class DataParallelPPOActor(BasePPOActor):
 
                         # Project out from the appropriate gradient
                         if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
-                            mod.suppo_grad = mod.suppo_grad - projection
+                            mod.suppo_grad = mod.suppo_grad - self.proma_intra_shrinkage * projection
                         else:
-                            grad = grad - projection
+                            grad = grad - self.proma_intra_shrinkage * projection
 
                 if hasattr(mod, "suppo_grad"):
                     suppo_grad = mod.suppo_grad
