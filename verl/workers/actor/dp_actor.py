@@ -129,6 +129,8 @@ class DataParallelPPOActor(BasePPOActor):
         #is_sgd = isinstance(self.actor_optimizer, optim.SGD) or self.actor_optimizer.__class__.__name__.lower() == "sgd"
 
         self.done_tests = set()
+        self.proma_intra_reductions = []
+        self.proma_reductions = []
 
     #########################################################
 
@@ -282,9 +284,16 @@ class DataParallelPPOActor(BasePPOActor):
 
                         # Project out from the appropriate gradient
                         if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                            norm_before = torch.norm(mod.suppo_grad).item()
                             mod.suppo_grad = mod.suppo_grad - self.proma_intra_shrinkage * projection
+                            norm_after = torch.norm(mod.suppo_grad).item()
                         else:
+                            norm_before = torch.norm(grad).item()
                             grad = grad - self.proma_intra_shrinkage * projection
+                            norm_after = torch.norm(grad).item()
+
+                        pct_reduction = 100.0 * (norm_before - norm_after) / (norm_before + 1e-8)
+                        self.proma_intra_reductions.append(pct_reduction)
 
                 if hasattr(mod, "suppo_grad"):
                     suppo_grad = mod.suppo_grad
@@ -315,7 +324,6 @@ class DataParallelPPOActor(BasePPOActor):
                                 weights = inv @ dot_products
                                 result = torch.zeros_like(seq_grads[0])
 
-                                print(f"projection weights: {weights}")
                                 for w, sg in zip(weights, seq_grads_normed):
                                     result = result + w * sg
                                 return result
@@ -326,10 +334,13 @@ class DataParallelPPOActor(BasePPOActor):
                         if torch.norm(projected_grad) > abs_bound:
                             projected_grad = projected_grad * abs_bound / (torch.norm(projected_grad) + 1e-8)
 
-                        print(f"grad: {torch.norm(grad)}")
-                        print(f"projected_grad: {torch.norm(projected_grad)}")
+                        norm_before_proma = torch.norm(suppo_grad).item()
+                        suppo_grad_after_proma = suppo_grad - self.proma_shrinkage * projected_grad
+                        norm_after_proma = torch.norm(suppo_grad_after_proma).item()
+                        pct_reduction_proma = 100.0 * (norm_before_proma - norm_after_proma) / (norm_before_proma + 1e-8)
+                        self.proma_reductions.append(pct_reduction_proma)
 
-                        mod.suppo_grad = suppo_grad - self.proma_shrinkage * projected_grad + grad
+                        mod.suppo_grad = suppo_grad_after_proma + grad
 
                     # else no proma
                     else:
@@ -959,6 +970,14 @@ class DataParallelPPOActor(BasePPOActor):
 
                     self.reset_isopo_cache()
                     self.update_batch_stats()
+
+                    # Log proma reduction stats
+                    if self.proma_intra_reductions:
+                        metrics["actor/proma_intra_reduction_pct"] = sum(self.proma_intra_reductions) / len(self.proma_intra_reductions)
+                        self.proma_intra_reductions.clear()
+                    if self.proma_reductions:
+                        metrics["actor/proma_reduction_pct"] = sum(self.proma_reductions) / len(self.proma_reductions)
+                        self.proma_reductions.clear()
                 ################################################################################
 
                 grad_norm = self._optimizer_step()
