@@ -274,7 +274,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                         # Solve K @ alpha = b with regularization scaled to the matrix
                         diag_mean = torch.mean(torch.diag(K))
-                        K_reg = K + 1e-2 * diag_mean * torch.eye(k, device=K.device, dtype=K.dtype)
+                        K_reg = K + 1e-3 * diag_mean * torch.eye(k, device=K.device, dtype=K.dtype)
                         alpha = torch.linalg.solve(K_reg, b)  # (k,)
 
                         # Build projection: P = sum_i alpha_i * g_i a_i^T = g_sampled.T @ (alpha[:, None] * a_sampled)
