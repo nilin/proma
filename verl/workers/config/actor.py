@@ -132,6 +132,8 @@ class ActorConfig(BaseConfig):
     proma_intra_from_accumulated: bool = False
     proma_intra_linear_combo: bool = False
     proma_intra_shrinkage: float = 1.0
+    proma_intra_eig: bool = False  # Use approximate leading eigenvectors of act_in and grad_out
+    proma_intra_eig_iters: int = 1  # Number of power iterations for approximate eigenvectors
     override_pg_loss: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False

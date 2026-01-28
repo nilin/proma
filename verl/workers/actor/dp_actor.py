@@ -114,6 +114,8 @@ class DataParallelPPOActor(BasePPOActor):
         self.proma_intra_from_accumulated = self.config.get("proma_intra_from_accumulated", False)
         self.proma_intra_linear_combo = self.config.get("proma_intra_linear_combo", False)
         self.proma_intra_shrinkage = self.config.get("proma_intra_shrinkage", 1.0)
+        self.proma_intra_eig = self.config.get("proma_intra_eig", False)
+        self.proma_intra_eig_iters = self.config.get("proma_intra_eig_iters", 1)
 
         self.bypass_isopo_scaling = self.config.get("bypass_isopo_scaling", False)
 
@@ -235,65 +237,104 @@ class DataParallelPPOActor(BasePPOActor):
                         grad += scaling * seq_grad 
 
                 if self.proma_intra:
-                    # Project out g_i a_i^T from the gradient, accounting for overlaps
-                    k = min(self.proma_intra_dim, act_in.shape[0])
-                    n = act_in.shape[0]
-
-                    if self.proma_intra_linear_combo:
-                        # Use random linear combinations via Gaussian projection
-                        P_a = torch.randn(k, n, device=act_in.device, dtype=act_in.dtype) / math.sqrt(n)
-                        if self.proma_intra_use_same:
-                            P_g = P_a
-                        else:
-                            P_g = torch.randn(k, n, device=g_out.device, dtype=g_out.dtype) / math.sqrt(n)
-                        a_sampled = P_a @ act_in  # (k, d_in)
-                        g_sampled = P_g @ g_out   # (k, d_out)
-                    else:
-                        # Use random subset of rows
-                        perm_a = torch.randperm(n, device=act_in.device)[:k]
-                        if self.proma_intra_use_same:
-                            perm_g = perm_a
-                        else:
-                            perm_g = torch.randperm(n, device=g_out.device)[:k]
-                        a_sampled = act_in[perm_a]  # (k, d_in)
-                        g_sampled = g_out[perm_g]   # (k, d_out)
-
                     # Choose which gradient to project from
                     if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
                         G = mod.suppo_grad
                     else:
                         G = grad
 
-                    # Compute Gram matrix: K_ij = <g_i a_i^T, g_j a_j^T>_F = (g_i^T g_j)(a_i^T a_j)
-                    K_g = g_sampled @ g_sampled.T  # (k, k)
-                    K_a = a_sampled @ a_sampled.T  # (k, k)
-                    K = K_g * K_a  # element-wise product (k, k)
+                    if self.proma_intra_eig:
+                        # Use approximate leading eigenvectors of act_in and grad_out
+                        k = min(self.proma_intra_dim, act_in.shape[0], act_in.shape[1], g_out.shape[1])
+                        n = act_in.shape[0]
 
-                    if not (isinstance(G, float) and G == 0.0):
-                        # Compute RHS: b_i = <G, g_i a_i^T>_F = g_i^T G a_i
-                        Ga = G @ a_sampled.T  # (d_out, k)
-                        b = (g_sampled * Ga.T).sum(dim=1)  # (k,)
+                        # Approximate top-k right singular vectors of act_in via randomized method
+                        # act_in: (n, d_in) -> Q_a: (d_in, k) orthonormal
+                        omega_a = torch.randn(n, k, device=act_in.device, dtype=act_in.dtype)
+                        Y_a = act_in.T @ omega_a  # (d_in, k)
+                        for _ in range(self.proma_intra_eig_iters):
+                            Y_a = act_in.T @ (act_in @ Y_a)
+                        Q_a, _ = torch.linalg.qr(Y_a)  # (d_in, k)
 
-                        # Solve K @ alpha = b with regularization scaled to the matrix
-                        diag_mean = torch.mean(torch.diag(K))
-                        K_reg = K + 1e-3 * diag_mean * torch.eye(k, device=K.device, dtype=K.dtype)
-                        alpha = torch.linalg.solve(K_reg, b)  # (k,)
+                        # Approximate top-k left singular vectors of grad_out via randomized method
+                        # g_out: (n, d_out) -> Q_g: (d_out, k) orthonormal
+                        omega_g = torch.randn(n, k, device=g_out.device, dtype=g_out.dtype)
+                        Y_g = g_out.T @ omega_g  # (d_out, k)
+                        for _ in range(self.proma_intra_eig_iters):
+                            Y_g = g_out.T @ (g_out @ Y_g)
+                        Q_g, _ = torch.linalg.qr(Y_g)  # (d_out, k)
 
-                        # Build projection: P = sum_i alpha_i * g_i a_i^T = g_sampled.T @ (alpha[:, None] * a_sampled)
-                        projection = g_sampled.T @ (alpha[:, None] * a_sampled)  # (d_out, d_in)
+                        if not (isinstance(G, float) and G == 0.0):
+                            # Project G onto the subspace spanned by Q_g (rows) and Q_a (cols)
+                            # projection = Q_g @ (Q_g.T @ G @ Q_a) @ Q_a.T
+                            projection = Q_g @ (Q_g.T @ G @ Q_a) @ Q_a.T  # (d_out, d_in)
 
-                        # Project out from the appropriate gradient
-                        if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
-                            norm_before = torch.norm(mod.suppo_grad).item()
-                            mod.suppo_grad = mod.suppo_grad - self.proma_intra_shrinkage * projection
-                            norm_after = torch.norm(mod.suppo_grad).item()
+                            # Project out from the appropriate gradient
+                            if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                                norm_before = torch.norm(mod.suppo_grad).item()
+                                mod.suppo_grad = mod.suppo_grad - self.proma_intra_shrinkage * projection
+                                norm_after = torch.norm(mod.suppo_grad).item()
+                            else:
+                                norm_before = torch.norm(grad).item()
+                                grad = grad - self.proma_intra_shrinkage * projection
+                                norm_after = torch.norm(grad).item()
+
+                            pct_reduction = 100.0 * (norm_before - norm_after) / (norm_before + 1e-8)
+                            self.proma_intra_reductions.append(pct_reduction)
+                    else:
+                        # Original sampling-based method
+                        k = min(self.proma_intra_dim, act_in.shape[0])
+                        n = act_in.shape[0]
+
+                        if self.proma_intra_linear_combo:
+                            # Use random linear combinations via Gaussian projection
+                            P_a = torch.randn(k, n, device=act_in.device, dtype=act_in.dtype) / math.sqrt(n)
+                            if self.proma_intra_use_same:
+                                P_g = P_a
+                            else:
+                                P_g = torch.randn(k, n, device=g_out.device, dtype=g_out.dtype) / math.sqrt(n)
+                            a_sampled = P_a @ act_in  # (k, d_in)
+                            g_sampled = P_g @ g_out   # (k, d_out)
                         else:
-                            norm_before = torch.norm(grad).item()
-                            grad = grad - self.proma_intra_shrinkage * projection
-                            norm_after = torch.norm(grad).item()
+                            # Use random subset of rows
+                            perm_a = torch.randperm(n, device=act_in.device)[:k]
+                            if self.proma_intra_use_same:
+                                perm_g = perm_a
+                            else:
+                                perm_g = torch.randperm(n, device=g_out.device)[:k]
+                            a_sampled = act_in[perm_a]  # (k, d_in)
+                            g_sampled = g_out[perm_g]   # (k, d_out)
 
-                        pct_reduction = 100.0 * (norm_before - norm_after) / (norm_before + 1e-8)
-                        self.proma_intra_reductions.append(pct_reduction)
+                        # Compute Gram matrix: K_ij = <g_i a_i^T, g_j a_j^T>_F = (g_i^T g_j)(a_i^T a_j)
+                        K_g = g_sampled @ g_sampled.T  # (k, k)
+                        K_a = a_sampled @ a_sampled.T  # (k, k)
+                        K = K_g * K_a  # element-wise product (k, k)
+
+                        if not (isinstance(G, float) and G == 0.0):
+                            # Compute RHS: b_i = <G, g_i a_i^T>_F = g_i^T G a_i
+                            Ga = G @ a_sampled.T  # (d_out, k)
+                            b = (g_sampled * Ga.T).sum(dim=1)  # (k,)
+
+                            # Solve K @ alpha = b with regularization scaled to the matrix
+                            diag_mean = torch.mean(torch.diag(K))
+                            K_reg = K + 1e-3 * diag_mean * torch.eye(k, device=K.device, dtype=K.dtype)
+                            alpha = torch.linalg.solve(K_reg, b)  # (k,)
+
+                            # Build projection: P = sum_i alpha_i * g_i a_i^T = g_sampled.T @ (alpha[:, None] * a_sampled)
+                            projection = g_sampled.T @ (alpha[:, None] * a_sampled)  # (d_out, d_in)
+
+                            # Project out from the appropriate gradient
+                            if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                                norm_before = torch.norm(mod.suppo_grad).item()
+                                mod.suppo_grad = mod.suppo_grad - self.proma_intra_shrinkage * projection
+                                norm_after = torch.norm(mod.suppo_grad).item()
+                            else:
+                                norm_before = torch.norm(grad).item()
+                                grad = grad - self.proma_intra_shrinkage * projection
+                                norm_after = torch.norm(grad).item()
+
+                            pct_reduction = 100.0 * (norm_before - norm_after) / (norm_before + 1e-8)
+                            self.proma_intra_reductions.append(pct_reduction)
 
                 if hasattr(mod, "suppo_grad"):
                     suppo_grad = mod.suppo_grad

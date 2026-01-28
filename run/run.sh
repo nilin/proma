@@ -68,7 +68,7 @@ reinforce () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.ex
 grpo () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False $ppo trainer.experiment_name=grpo "$@"; }
 proma () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 +actor_rollout_ref.actor.proma_relative_bound=0.5 trainer.experiment_name=proma "$@"; }
 proma_intra () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=30 +actor_rollout_ref.actor.proma_intra_use_same=False +actor_rollout_ref.actor.proma_intra_from_accumulated=False +actor_rollout_ref.actor.proma_intra_linear_combo=False +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra "$@"; }
+proma_intra_eig () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=30 +actor_rollout_ref.actor.proma_intra_eig=True +actor_rollout_ref.actor.proma_intra_eig_iters=1 +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra_eig "$@"; }
 
-bash run/next.sh
 
 
