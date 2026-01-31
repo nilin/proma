@@ -339,7 +339,13 @@ class DataParallelPPOActor(BasePPOActor):
                 if hasattr(mod, "suppo_grad"):
                     suppo_grad = mod.suppo_grad
 
-                    if self.proma_shrinkage > 0.0:
+                    # Handle case where suppo_grad is not a tensor (e.g., when grad was 0.0)
+                    if not isinstance(suppo_grad, torch.Tensor):
+                        suppo_grad = grad
+                        mod.suppo_grad = grad
+
+                    # Only do proma operations if suppo_grad is a tensor
+                    if self.proma_shrinkage > 0.0 and isinstance(suppo_grad, torch.Tensor):
                         # Calculate normalized sequence gradients
                         seq_grads_normed = [sg / (torch.norm(sg) + 1e-8) for sg in seq_grads]
 
