@@ -41,6 +41,7 @@ from verl.workers.actor import BasePPOActor
 from verl.workers.config import ActorConfig
 import functools
 import math
+from contextlib import contextmanager, nullcontext
 
 __all__ = ["DataParallelPPOActor"]
 
@@ -198,13 +199,9 @@ class DataParallelPPOActor(BasePPOActor):
                         return torch.sqrt(x.pow(2) + reg)
 
                 if self.isopo_nat:
-                    ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
-
-                    for i in range(len(seq_grads)):
-                        for j in range(i, len(seq_grads)):
-
-                            ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
-                            ntk[j, i] = ntk[i, j]
+                    # Vectorized NTK computation: stack and compute gram matrix
+                    seq_grads_flat = torch.stack([sg.flatten() for sg in seq_grads], dim=0)  # (n_seqs, d_out*d_in)
+                    ntk = seq_grads_flat @ seq_grads_flat.T  # (n_seqs, n_seqs)
                     D, U = torch.linalg.eigh(ntk)
                     reg = self.isopo_nat_reg * self.batch_stats(f"isopo_nat_reg_{lname}", torch.mean(D))
                     preconditioner = reg / (D + reg + 1e-8)
@@ -359,21 +356,18 @@ class DataParallelPPOActor(BasePPOActor):
                             projected_grad = suppo_grad - project_to_complement(suppo_grad)
 
                         else:
-                            ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
-                            for i in range(len(seq_grads_normed)):
-                                for j in range(i, len(seq_grads_normed)):
-                                    ntk[i, j] = torch.sum(seq_grads_normed[i] * seq_grads_normed[j])
-                                    ntk[j, i] = ntk[i, j]
+                            # Vectorized NTK computation for normalized seq_grads
+                            seq_grads_normed_flat = torch.stack([sg.flatten() for sg in seq_grads_normed], dim=0)  # (n, d)
+                            ntk = seq_grads_normed_flat @ seq_grads_normed_flat.T  # (n, n)
 
                             def project(acc_grad):
-                                dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
+                                acc_flat = acc_grad.flatten()  # (d,)
+                                dot_products = seq_grads_normed_flat @ acc_flat  # (n,)
                                 inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
-                                weights = inv @ dot_products
-                                result = torch.zeros_like(seq_grads[0])
-
-                                for w, sg in zip(weights, seq_grads_normed):
-                                    result = result + w * sg
-                                return result
+                                weights = inv @ dot_products  # (n,)
+                                # Vectorized weighted sum: weights @ seq_grads_normed_flat -> (d,)
+                                result_flat = weights @ seq_grads_normed_flat
+                                return result_flat.view_as(seq_grads[0])
 
                             projected_grad = project(suppo_grad)
 
@@ -404,6 +398,29 @@ class DataParallelPPOActor(BasePPOActor):
             else:
                 lmod.register_forward_hook(_fwd_hook)
                 lmod.register_full_backward_hook(functools.partial(_bwd_hook, lname=lname))
+
+    @contextmanager
+    def _isopo_no_grad_sync(self):
+        """Context manager to disable gradient sync for Linear layers when using ISOPO.
+
+        This prevents wasted AllReduce operations since ISOPO replaces gradients anyway.
+        For FSDP1: uses no_sync() context manager
+        For FSDP2 (FSDPModule): uses set_requires_gradient_sync(False)
+        """
+        if isinstance(self.actor_module, FSDP):
+            # FSDP1: use the no_sync context manager
+            with self.actor_module.no_sync():
+                yield
+        elif isinstance(self.actor_module, FSDPModule):
+            # FSDP2: disable gradient sync, yield, then re-enable
+            self.actor_module.set_requires_gradient_sync(False)
+            try:
+                yield
+            finally:
+                self.actor_module.set_requires_gradient_sync(True)
+        else:
+            # Non-FSDP case: nothing to do
+            yield
 
     def batch_stats(self, name: str, value: torch.Tensor) -> torch.Tensor:
         if not hasattr(self, "done_batch_stats"):
@@ -884,112 +901,116 @@ class DataParallelPPOActor(BasePPOActor):
 
                 self.actor_optimizer.zero_grad()
 
-                for mcb_idx, micro_batch in enumerate(micro_batches):
-                    micro_batch = micro_batch.to(get_device_id())
-                    micro_batch_metrics = {}
-                    model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
-                    response_mask = model_inputs["response_mask"]
-                    old_log_prob = model_inputs["old_log_probs"]
-                    advantages = model_inputs["advantages"]
-
-                    entropy_coeff = self.config.entropy_coeff
-                    loss_agg_mode = self.config.loss_agg_mode
-
-                    if self.config.use_dynamic_bsz:
-                        loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
-                    else:
-                        loss_scale_factor = 1 / self.gradient_accumulation
-
-                    ################################################################################
-                    if self.isopo:
-                        self.attention_mask = attention_mask = model_inputs["attention_mask"]
-                        self.seq_advantages = advantages[:, 0].to(attention_mask.device)
-                        self.test_flatten_unflatten(attention_mask)
-                    ################################################################################
-
-                    # all return: (bsz, response_length)
-                    calculate_entropy = False
-                    if entropy_coeff != 0:
-                        calculate_entropy = True
-                    entropy, log_prob = self._forward_micro_batch(
-                        model_inputs, temperature=temperature, calculate_entropy=calculate_entropy
-                    )
-
-                    # for fully_async_policy recipe
-                    if hasattr(self.config, "use_rollout_log_probs") and self.config.use_rollout_log_probs:
+                # When using ISOPO, disable gradient sync since we'll replace gradients anyway.
+                # This avoids wasted AllReduce operations.
+                grad_sync_ctx = self._isopo_no_grad_sync() if self.isopo else nullcontext()
+                with grad_sync_ctx:
+                    for mcb_idx, micro_batch in enumerate(micro_batches):
+                        micro_batch = micro_batch.to(get_device_id())
+                        micro_batch_metrics = {}
+                        model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+                        response_mask = model_inputs["response_mask"]
                         old_log_prob = model_inputs["old_log_probs"]
-                    else:
-                        if on_policy:
-                            old_log_prob = log_prob.detach()
+                        advantages = model_inputs["advantages"]
+
+                        entropy_coeff = self.config.entropy_coeff
+                        loss_agg_mode = self.config.loss_agg_mode
+
+                        if self.config.use_dynamic_bsz:
+                            loss_scale_factor = response_mask.shape[0] / self.config.ppo_mini_batch_size
                         else:
+                            loss_scale_factor = 1 / self.gradient_accumulation
+
+                        ################################################################################
+                        if self.isopo:
+                            self.attention_mask = attention_mask = model_inputs["attention_mask"]
+                            self.seq_advantages = advantages[:, 0].to(attention_mask.device)
+                            self.test_flatten_unflatten(attention_mask)
+                        ################################################################################
+
+                        # all return: (bsz, response_length)
+                        calculate_entropy = False
+                        if entropy_coeff != 0:
+                            calculate_entropy = True
+                        entropy, log_prob = self._forward_micro_batch(
+                            model_inputs, temperature=temperature, calculate_entropy=calculate_entropy
+                        )
+
+                        # for fully_async_policy recipe
+                        if hasattr(self.config, "use_rollout_log_probs") and self.config.use_rollout_log_probs:
                             old_log_prob = model_inputs["old_log_probs"]
-
-                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
-                    # vanilla -> verl.trainer.ppo.core_algos.compute_policy_loss_vanilla
-
-                    # Extract pre-computed rollout correction weights if present
-                    # Weights are computed centrally in trainer and added when algorithm.rollout_is=True
-                    rollout_is_weights = model_inputs.get("rollout_is_weights", None)
-
-                    # NOTE: Both mismatch diagnostic metrics (PPL, KL, etc.) and IS weight metrics
-                    # are computed centrally in ray_trainer.py for consistency and efficiency.
-                    # This ensures metrics are computed uniformly across all batches at the trainer level
-                    # and avoids redundant computation across workers and micro-batches.
-
-                    # gpg -> verl.trainer.ppo.core_algos.compute_policy_loss_gpg
-                    # clip_cov -> verl.trainer.ppo.core_algos.compute_policy_loss_clip_cov
-                    policy_loss_fn = get_policy_loss_fn(loss_mode)
-
-                    if self.override_pg_loss:
-                        if self.include_advantages_in_loss:
-                            pg_loss = agg_loss(loss_mat=-log_prob*advantages, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
                         else:
-                            pg_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
-                    else:
-                        # Compute policy loss (any function is expected to return 2 values)
-                        pg_loss, pg_metrics = policy_loss_fn(
-                            old_log_prob=old_log_prob,
-                            log_prob=log_prob,
-                            advantages=advantages if self.include_advantages_in_loss else torch.ones_like(advantages),
-                            response_mask=response_mask,
-                            loss_agg_mode=loss_agg_mode,
-                            config=self.config,
-                            rollout_is_weights=rollout_is_weights,
-                        )
-                        micro_batch_metrics.update(pg_metrics)
+                            if on_policy:
+                                old_log_prob = log_prob.detach()
+                            else:
+                                old_log_prob = model_inputs["old_log_probs"]
 
-                    if entropy_coeff != 0:
-                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                        loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
+                        # vanilla -> verl.trainer.ppo.core_algos.compute_policy_loss_vanilla
 
-                        # compute policy loss
-                        policy_loss = pg_loss - entropy_loss * entropy_coeff
-                    else:
-                        policy_loss = pg_loss
+                        # Extract pre-computed rollout correction weights if present
+                        # Weights are computed centrally in trainer and added when algorithm.rollout_is=True
+                        rollout_is_weights = model_inputs.get("rollout_is_weights", None)
 
-                    if self.config.use_kl_loss:
-                        ref_log_prob = model_inputs["ref_log_prob"]
-                        # compute kl loss
-                        kld = kl_penalty(
-                            logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type
-                        )
-                        kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                        # NOTE: Both mismatch diagnostic metrics (PPL, KL, etc.) and IS weight metrics
+                        # are computed centrally in ray_trainer.py for consistency and efficiency.
+                        # This ensures metrics are computed uniformly across all batches at the trainer level
+                        # and avoids redundant computation across workers and micro-batches.
 
-                        policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
-                        micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item() * loss_scale_factor
-                        micro_batch_metrics["actor/kl_coef"] = self.config.kl_loss_coef
+                        # gpg -> verl.trainer.ppo.core_algos.compute_policy_loss_gpg
+                        # clip_cov -> verl.trainer.ppo.core_algos.compute_policy_loss_clip_cov
+                        policy_loss_fn = get_policy_loss_fn(loss_mode)
 
-                    if self.config.use_dynamic_bsz:
-                        # relative to the dynamic bsz
-                        loss = policy_loss * loss_scale_factor
-                    else:
-                        loss = policy_loss * loss_scale_factor
-                    loss.backward()
+                        if self.override_pg_loss:
+                            if self.include_advantages_in_loss:
+                                pg_loss = agg_loss(loss_mat=-log_prob*advantages, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                            else:
+                                pg_loss = agg_loss(loss_mat=-log_prob, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+                        else:
+                            # Compute policy loss (any function is expected to return 2 values)
+                            pg_loss, pg_metrics = policy_loss_fn(
+                                old_log_prob=old_log_prob,
+                                log_prob=log_prob,
+                                advantages=advantages if self.include_advantages_in_loss else torch.ones_like(advantages),
+                                response_mask=response_mask,
+                                loss_agg_mode=loss_agg_mode,
+                                config=self.config,
+                                rollout_is_weights=rollout_is_weights,
+                            )
+                            micro_batch_metrics.update(pg_metrics)
 
-                    micro_batch_metrics["actor/pg_loss"] = pg_loss.detach().item() * loss_scale_factor
-                    append_to_dict(metrics, micro_batch_metrics)
+                        if entropy_coeff != 0:
+                            entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
 
-                    if self.testing:
-                        break
+                            # compute policy loss
+                            policy_loss = pg_loss - entropy_loss * entropy_coeff
+                        else:
+                            policy_loss = pg_loss
+
+                        if self.config.use_kl_loss:
+                            ref_log_prob = model_inputs["ref_log_prob"]
+                            # compute kl loss
+                            kld = kl_penalty(
+                                logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type
+                            )
+                            kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+
+                            policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
+                            micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item() * loss_scale_factor
+                            micro_batch_metrics["actor/kl_coef"] = self.config.kl_loss_coef
+
+                        if self.config.use_dynamic_bsz:
+                            # relative to the dynamic bsz
+                            loss = policy_loss * loss_scale_factor
+                        else:
+                            loss = policy_loss * loss_scale_factor
+                        loss.backward()
+
+                        micro_batch_metrics["actor/pg_loss"] = pg_loss.detach().item() * loss_scale_factor
+                        append_to_dict(metrics, micro_batch_metrics)
+
+                        if self.testing:
+                            break
 
                 if self.isopo:
                     for lname, lmod in self.linear_modules.items():
