@@ -47,7 +47,7 @@ run-alg () {
         critic.strategy=fsdp2 \
         trainer.critic_warmup=0 \
         trainer.logger='["console","wandb"]' \
-        trainer.project_name='suppo' \
+        trainer.project_name='commac' \
         trainer.n_gpus_per_node=1 \
         trainer.nnodes=1 \
         trainer.save_freq=20 \
