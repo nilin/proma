@@ -155,18 +155,25 @@ class DataParallelPPOActor(BasePPOActor):
             def _fwd_hook(mod, inputs, output):
                 in_tensor = inputs[0] if isinstance(inputs, (tuple, list)) else inputs
                 try:
-                    mod._isopo_act_in = in_tensor.detach().clone()
+                    mod._isopo_act_in = in_tensor.detach()
                 except Exception:
                     mod._isopo_act_in = None
 
             # Full backward hook to compute a scalar using act_in and grad_out
             def _bwd_hook(mod, grad_input, grad_output, dump=False, lname=None):
-                act_in = mod._isopo_act_in.clone()
-                _g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
-                g_out = _g_out.clone()
+              with torch.no_grad():
+                # Profiling accumulators (class-level)
+                if not hasattr(self, '_hook_timings'):
+                    self._hook_timings = {'setup': 0, 'unflatten': 0, 'seq_grads': 0, 'grad_accum': 0, 'proma_intra': 0, 'proma': 0, 'count': 0}
+                import time
+                _t0 = time.perf_counter()
 
-                act_in = act_in.to(dtype=torch.float32)
-                g_out = g_out.to(dtype=torch.float32)
+                act_in = mod._isopo_act_in
+                _g_out = grad_output[0] if isinstance(grad_output, (tuple, list)) else grad_output
+                g_out = _g_out
+
+                # Keep original dtype for memory efficiency, convert to float32 only for sensitive ops
+                orig_dtype = act_in.dtype
 
                 # Explicitly remove a leading singleton (e.g., [1, T, D] -> [T, D])
                 if act_in.dim() >= 3 and act_in.size(0) == 1:
@@ -180,12 +187,23 @@ class DataParallelPPOActor(BasePPOActor):
                 a0 = act_in[topk_idx]
                 g0 = g_out[topk_idx]
 
+                _t1 = time.perf_counter()
+                self._hook_timings['setup'] += _t1 - _t0
+
                 act_in_seqs = self.unflatten_attention_mask_list(act_in, self.attention_mask)
                 g_out_seqs = self.unflatten_attention_mask_list(g_out, self.attention_mask)
 
-                seq_grads = []
-                for i, (act_in_seq, g_out_seq) in enumerate(zip(act_in_seqs, g_out_seqs)):
-                    seq_grads.append(g_out_seq.T @ act_in_seq)
+                _t2 = time.perf_counter()
+                self._hook_timings['unflatten'] += _t2 - _t1
+
+                # Compute seq_grads - each has shape (d_out, d_in)
+                seq_grads = [g_out_seq.T @ act_in_seq for act_in_seq, g_out_seq in zip(act_in_seqs, g_out_seqs)]
+                # Stack into (num_seqs, d_out, d_in) for vectorized operations
+                seq_grads_stacked = torch.stack(seq_grads)
+                num_seqs = seq_grads_stacked.shape[0]
+
+                _t3 = time.perf_counter()
+                self._hook_timings['seq_grads'] += _t3 - _t2
 
                 def add_reg_to_square(x, reg_factor, name, keep_small_invariant=self.isopo_keep_small_invariant):
                     reg = reg_factor * self.batch_stats(f"{name}_squared_reg_{lname}", x.pow(2))
@@ -198,43 +216,44 @@ class DataParallelPPOActor(BasePPOActor):
                         return torch.sqrt(x.pow(2) + reg)
 
                 if self.isopo_nat:
-                    ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
+                    # Vectorized NTK computation: ntk[i,j] = sum(seq_grads[i] * seq_grads[j])
+                    # Flatten each seq_grad to vector, then compute gram matrix
+                    seq_grads_flat = seq_grads_stacked.view(num_seqs, -1).float()  # (num_seqs, d_out*d_in)
+                    ntk = seq_grads_flat @ seq_grads_flat.T  # (num_seqs, num_seqs)
 
-                    for i in range(len(seq_grads)):
-                        for j in range(i, len(seq_grads)):
-
-                            ntk[i, j] = torch.sum(seq_grads[i] * seq_grads[j])
-                            ntk[j, i] = ntk[i, j]
                     D, U = torch.linalg.eigh(ntk)
                     reg = self.isopo_nat_reg * self.batch_stats(f"isopo_nat_reg_{lname}", torch.mean(D))
                     preconditioner = reg / (D + reg + 1e-8)
                     advantages_preconditioned = U @ (preconditioner * (U.T @ self.seq_advantages))
 
-                    grad = torch.stack(seq_grads, dim=-1) @ advantages_preconditioned
+                    # Weighted sum: (num_seqs, d_out, d_in) with weights (num_seqs,)
+                    grad = torch.einsum('n,nij->ij', advantages_preconditioned.to(seq_grads_stacked.dtype), seq_grads_stacked)
 
                 else:
-                    grad = 0.0
-                    for i, (seq_grad, advantage) in enumerate(zip(seq_grads, self.seq_advantages)):
+                    if self.bypass_isopo_scaling:
+                        # Vectorized weighted sum: advantages (num_seqs,) @ seq_grads (num_seqs, d_out, d_in)
+                        grad = torch.einsum('n,nij->ij', self.seq_advantages.to(seq_grads_stacked.dtype), seq_grads_stacked)
+                    else:
+                        grad = 0.0
+                        for i, (seq_grad, advantage) in enumerate(zip(seq_grads, self.seq_advantages)):
+                            overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
+                            overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
 
-                        if self.bypass_isopo_scaling:
-                            grad += advantage * seq_grad
-                            continue
+                            p,q,r = self.isopo_norm_neg_power, self.isopo_overlap_neg_power, self.isopo_rel_overlap_neg_power
 
-                        overlap = torch.norm(torch.sum((g0 @ seq_grad) * a0, dim=1)) / torch.norm(torch.norm(g0, dim=1) * torch.norm(a0, dim=1) + 1e-12)
-                        overlap_over_norm = overlap / (torch.norm(seq_grad) + 1e-12)
+                            assert not self.include_advantages_in_loss, "isopo to be used with separate_advantages"
 
-                        p,q,r = self.isopo_norm_neg_power, self.isopo_overlap_neg_power, self.isopo_rel_overlap_neg_power
+                            norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.isopo_norm_reg, "norm")
+                            overlap_w_reg = add_reg_to_square(overlap, self.isopo_overlap_reg, "overlap")
+                            rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.isopo_rel_overlap_reg, "rel_overlap")
 
-                        assert not self.include_advantages_in_loss, "isopo to be used with separate_advantages"
+                            scaling_factor = 1.0 / (norm_w_reg.pow(p) * overlap_w_reg.pow(q) * rel_overlap_w_reg.pow(r) + 1e-8)
+                            scaling = scaling_factor * advantage
 
-                        norm_w_reg = add_reg_to_square(torch.norm(seq_grad), self.isopo_norm_reg, "norm")
-                        overlap_w_reg = add_reg_to_square(overlap, self.isopo_overlap_reg, "overlap")
-                        rel_overlap_w_reg = add_reg_to_square(overlap_over_norm, self.isopo_rel_overlap_reg, "rel_overlap")
+                            grad += scaling * seq_grad
 
-                        scaling_factor = 1.0 / (norm_w_reg.pow(p) * overlap_w_reg.pow(q) * rel_overlap_w_reg.pow(r) + 1e-8)
-                        scaling = scaling_factor * advantage
-
-                        grad += scaling * seq_grad 
+                _t4 = time.perf_counter()
+                self._hook_timings['grad_accum'] += _t4 - _t3
 
                 if self.proma_intra:
                     # Choose which gradient to project from
@@ -248,26 +267,32 @@ class DataParallelPPOActor(BasePPOActor):
                         k = min(self.proma_intra_dim, act_in.shape[0], act_in.shape[1], g_out.shape[1])
                         n = act_in.shape[0]
 
-                        # Approximate top-k right singular vectors of act_in via randomized method
-                        # act_in: (n, d_in) -> Q_a: (d_in, k) orthonormal
-                        omega_a = torch.randn(n, k, device=act_in.device, dtype=act_in.dtype)
-                        Y_a = act_in.T @ omega_a  # (d_in, k)
-                        for _ in range(self.proma_intra_eig_iters):
-                            Y_a = act_in.T @ (act_in @ Y_a)
-                        Q_a, _ = torch.linalg.qr(Y_a)  # (d_in, k)
+                        with torch.no_grad():
+                            # Convert to float32 once for numerical stability in QR
+                            act_in_f = act_in.float()
+                            g_out_f = g_out.float()
 
-                        # Approximate top-k left singular vectors of grad_out via randomized method
-                        # g_out: (n, d_out) -> Q_g: (d_out, k) orthonormal
-                        omega_g = torch.randn(n, k, device=g_out.device, dtype=g_out.dtype)
-                        Y_g = g_out.T @ omega_g  # (d_out, k)
-                        for _ in range(self.proma_intra_eig_iters):
-                            Y_g = g_out.T @ (g_out @ Y_g)
-                        Q_g, _ = torch.linalg.qr(Y_g)  # (d_out, k)
+                            # Approximate top-k right singular vectors of act_in via randomized method
+                            # act_in: (n, d_in) -> Q_a: (d_in, k) orthonormal
+                            omega_a = torch.randn(n, k, device=act_in.device, dtype=torch.float32)
+                            Y_a = act_in_f.T @ omega_a  # (d_in, k)
+                            for _ in range(self.proma_intra_eig_iters):
+                                Y_a = act_in_f.T @ (act_in_f @ Y_a)
+                            Q_a, _ = torch.linalg.qr(Y_a)  # (d_in, k)
+
+                            # Approximate top-k left singular vectors of grad_out via randomized method
+                            # g_out: (n, d_out) -> Q_g: (d_out, k) orthonormal
+                            omega_g = torch.randn(n, k, device=g_out.device, dtype=torch.float32)
+                            Y_g = g_out_f.T @ omega_g  # (d_out, k)
+                            for _ in range(self.proma_intra_eig_iters):
+                                Y_g = g_out_f.T @ (g_out_f @ Y_g)
+                            Q_g, _ = torch.linalg.qr(Y_g)  # (d_out, k)
 
                         if not (isinstance(G, float) and G == 0.0):
                             # Project G onto the subspace spanned by Q_g (rows) and Q_a (cols)
                             # projection = Q_g @ (Q_g.T @ G @ Q_a) @ Q_a.T
-                            projection = Q_g @ (Q_g.T @ G @ Q_a) @ Q_a.T  # (d_out, d_in)
+                            G_f = G.float() if isinstance(G, torch.Tensor) else G
+                            projection = (Q_g @ (Q_g.T @ G_f @ Q_a) @ Q_a.T).to(grad.dtype)  # (d_out, d_in)
 
                             # Project out from the appropriate gradient
                             if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
@@ -336,6 +361,9 @@ class DataParallelPPOActor(BasePPOActor):
                             pct_reduction = 100.0 * (norm_before - norm_after) / (norm_before + 1e-8)
                             self.proma_intra_reductions.append(pct_reduction)
 
+                _t5 = time.perf_counter()
+                self._hook_timings['proma_intra'] += _t5 - _t4
+
                 if hasattr(mod, "suppo_grad"):
                     suppo_grad = mod.suppo_grad
 
@@ -346,36 +374,36 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # Only do proma operations if suppo_grad is a tensor
                     if self.proma_shrinkage > 0.0 and isinstance(suppo_grad, torch.Tensor):
-                        # Calculate normalized sequence gradients
-                        seq_grads_normed = [sg / (torch.norm(sg) + 1e-8) for sg in seq_grads]
+                        # Vectorized: compute norms and normalize seq_grads_stacked
+                        # seq_grads_stacked: (num_seqs, d_out, d_in)
+                        seq_norms = torch.norm(seq_grads_stacked.view(num_seqs, -1), dim=1, keepdim=True)  # (num_seqs, 1)
+                        seq_grads_normed_stacked = seq_grads_stacked / (seq_norms.unsqueeze(-1) + 1e-8)  # (num_seqs, d_out, d_in)
+                        seq_grads_normed_flat = seq_grads_normed_stacked.view(num_seqs, -1).float()  # (num_seqs, d_out*d_in)
 
                         if self.quick_ntk:
-                            def project_to_complement(acc_grad):
-                                for _ in range(2):
-                                    for sg in seq_grads_normed:
-                                        acc_grad = acc_grad - torch.sum(acc_grad*sg) * sg
-                                return acc_grad
-
-                            projected_grad = suppo_grad - project_to_complement(suppo_grad)
+                            # Vectorized Gram-Schmidt-like projection
+                            # project_to_complement: iteratively remove components along each normalized gradient
+                            acc_grad_flat = suppo_grad.view(-1).float()  # (d_out*d_in,)
+                            for _ in range(2):
+                                # dot_products[i] = acc_grad . seq_grads_normed[i]
+                                dot_products = seq_grads_normed_flat @ acc_grad_flat  # (num_seqs,)
+                                # acc_grad -= sum_i dot_products[i] * seq_grads_normed[i]
+                                acc_grad_flat = acc_grad_flat - (dot_products.unsqueeze(1) * seq_grads_normed_flat).sum(dim=0)
+                            complement = acc_grad_flat.view_as(suppo_grad).to(suppo_grad.dtype)
+                            projected_grad = suppo_grad - complement
 
                         else:
-                            ntk = torch.zeros((len(seq_grads), len(seq_grads)), dtype=torch.float32, device=seq_grads[0].device)
-                            for i in range(len(seq_grads_normed)):
-                                for j in range(i, len(seq_grads_normed)):
-                                    ntk[i, j] = torch.sum(seq_grads_normed[i] * seq_grads_normed[j])
-                                    ntk[j, i] = ntk[i, j]
+                            # Vectorized NTK computation
+                            ntk = seq_grads_normed_flat @ seq_grads_normed_flat.T  # (num_seqs, num_seqs)
 
-                            def project(acc_grad):
-                                dot_products = torch.stack([torch.sum(acc_grad*sg) for sg in seq_grads_normed])
-                                inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(len(seq_grads_normed), device=ntk.device, dtype=ntk.dtype))
-                                weights = inv @ dot_products
-                                result = torch.zeros_like(seq_grads[0])
-
-                                for w, sg in zip(weights, seq_grads_normed):
-                                    result = result + w * sg
-                                return result
-
-                            projected_grad = project(suppo_grad)
+                            # Vectorized projection
+                            suppo_grad_flat = suppo_grad.view(-1).float()
+                            dot_products = seq_grads_normed_flat @ suppo_grad_flat  # (num_seqs,)
+                            inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(num_seqs, device=ntk.device, dtype=ntk.dtype))
+                            weights = inv @ dot_products  # (num_seqs,)
+                            # result = sum_i weights[i] * seq_grads_normed[i]
+                            result_flat = (weights.unsqueeze(1) * seq_grads_normed_flat).sum(dim=0)
+                            projected_grad = result_flat.view_as(suppo_grad).to(suppo_grad.dtype)
 
                         abs_bound = torch.norm(grad) * self.proma_relative_bound
                         if torch.norm(projected_grad) > abs_bound:
@@ -397,6 +425,17 @@ class DataParallelPPOActor(BasePPOActor):
                 else:
                     mod.suppo_grad = grad
 
+                _t6 = time.perf_counter()
+                self._hook_timings['proma'] += _t6 - _t5
+                self._hook_timings['count'] += 1
+
+                # Print timings every 1000 hook calls
+                if self._hook_timings['count'] % 1000 == 0:
+                    total = sum(v for k, v in self._hook_timings.items() if k != 'count')
+                    print(f"[PROFILE] Hook timings after {self._hook_timings['count']} calls (total={total:.2f}s):")
+                    for k, v in self._hook_timings.items():
+                        if k != 'count':
+                            print(f"  {k}: {v:.3f}s ({100*v/total:.1f}%)")
 
             if self.testing and i in [8,16,32,64,128]:
                 lmod.register_forward_hook(_fwd_hook)
@@ -554,10 +593,14 @@ class DataParallelPPOActor(BasePPOActor):
         return out
 
     def unflatten_attention_mask_list(self, flat_x: torch.Tensor, attention_mask: torch.Tensor) -> list[torch.Tensor]:
+        # Optimized: directly slice flat_x using cumulative lengths, avoiding intermediate tensor
         res = []
-        unflat_x = self.unflatten_attention_mask(flat_x, attention_mask)
-        for row, a in zip(unflat_x, attention_mask):
-            res.append(row[a.bool()])
+        lengths = attention_mask.sum(dim=1).tolist()  # list of sequence lengths
+        start = 0
+        for length in lengths:
+            length = int(length)
+            res.append(flat_x[start:start+length])
+            start += length
         return res
 
     #########################################################
