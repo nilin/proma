@@ -69,7 +69,7 @@ run-alg () {
         actor_rollout_ref.actor.optim.lr=2e-6 \
         +actor_rollout_ref.actor.isopo_keep_small_invariant=False \
         +actor_rollout_ref.actor.bypass_isopo_scaling=True \
-        +actor_rollout_ref.actor.quick_ntk=True \
+        +actor_rollout_ref.actor.quick_ntk=False \
         $pure \
         "$@"
 }

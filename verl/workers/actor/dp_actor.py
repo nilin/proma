@@ -377,8 +377,7 @@ class DataParallelPPOActor(BasePPOActor):
                             # Vectorized projection
                             suppo_grad_flat = suppo_grad.view(-1).float()
                             dot_products = seq_grads_normed_flat @ suppo_grad_flat  # (num_seqs,)
-                            inv = torch.linalg.inv(ntk + 1e-2 * torch.eye(num_seqs, device=ntk.device, dtype=ntk.dtype))
-                            weights = inv @ dot_products  # (num_seqs,)
+                            weights = torch.linalg.solve(ntk + 1e-2 * torch.eye(num_seqs, device=ntk.device, dtype=ntk.dtype), dot_products)  # (num_seqs,)
                             # result = sum_i weights[i] * seq_grads_normed[i]
                             result_flat = (weights.unsqueeze(1) * seq_grads_normed_flat).sum(dim=0)
                             projected_grad = result_flat.view_as(suppo_grad).to(suppo_grad.dtype)
