@@ -61,13 +61,13 @@ run-alg () {
         critic.strategy=fsdp2 \
         trainer.critic_warmup=0 \
         trainer.logger='["console","wandb"]' \
-        trainer.project_name='code-proma' \
+        trainer.project_name='proma-code' \
         trainer.n_gpus_per_node=1 \
         trainer.nnodes=1 \
         trainer.save_freq=10 \
         trainer.test_freq=2 \
         trainer.total_epochs=50 \
-        trainer.total_training_steps=200 \
+        trainer.total_training_steps=100 \
         trainer.resume_mode=disable \
         trainer.val_before_train=True \
         actor_rollout_ref.actor.optim.lr=2e-6 \

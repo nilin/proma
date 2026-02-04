@@ -33,8 +33,8 @@ import datasets
 
 def make_prompt(example):
     """Convert MBPP example to a chat prompt format."""
-    # MBPP has 'text' (problem description) and 'code' (solution)
-    problem = example["text"]
+    # MBPP sanitized uses 'prompt' field for problem description
+    problem = example["prompt"]
 
     instruction = (
         "Write a Python function to solve the following problem. "
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     if args.local_dataset_path:
         dataset = datasets.load_dataset(args.local_dataset_path)
     else:
-        dataset = datasets.load_dataset(data_source, "sanitized", trust_remote_code=True)
+        dataset = datasets.load_dataset(data_source, "sanitized")
 
     # MBPP sanitized has train/test/validation splits
     # train: 374, validation: 90, test: 500

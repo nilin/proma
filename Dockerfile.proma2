@@ -88,13 +88,16 @@ RUN pip install --no-deps -e .
 RUN pip install --no-cache-dir --force-reinstall "numpy<2.0.0"
 
 # Create directories for model and data
-RUN mkdir -p /app/models /root/data/gsm8k
+RUN mkdir -p /app/models /root/data/gsm8k /root/data/svamp /root/data/mbpp /root/data/humaneval
 
 # Download the Qwen3-0.6B model
 RUN huggingface-cli download Qwen/Qwen3-0.6B --local-dir /app/models/Qwen3-0.6B
 
-# Preprocess GSM8K data
-RUN python examples/data_preprocess/gsm8k.py --local_save_dir /root/data/gsm8k
+# Preprocess all datasets
+RUN python examples/data_preprocess/gsm8k.py --local_save_dir /root/data/gsm8k && \
+    python examples/data_preprocess/svamp.py --local_save_dir /root/data/svamp && \
+    python examples/data_preprocess/mbpp.py --local_save_dir /root/data/mbpp && \
+    python examples/data_preprocess/humaneval.py --local_save_dir /root/data/humaneval
 
 # Copy and setup entrypoint script
 COPY docker-entrypoint.sh /app/entrypoint.sh

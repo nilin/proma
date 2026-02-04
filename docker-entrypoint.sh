@@ -19,9 +19,21 @@ fi
 if [ $# -gt 0 ]; then
     # Check if first argument is a training function
     case "$1" in
-        reinforce|grpo|proma|proma_intra|proma_intra_eig|run-alg)
-            source run/run.sh
+        # Math benchmarks (GSM8K train -> SVAMP/GSM8K val)
+        reinforce|grpo|proma|proma_intra|proma_intra_eig|gsm8k_reinforce|gsm8k_grpo|gsm8k_proma)
+            source run/run_svamp.sh
             "$@"
+            ;;
+        # Code benchmarks (MBPP train -> HumanEval val)
+        code_reinforce|code_grpo|code_proma|code_proma_intra|code_proma_intra_eig|humaneval_reinforce|humaneval_grpo|humaneval_proma|test_run)
+            source run/run_humaneval.sh
+            # Strip "code_" prefix if present
+            cmd="$1"
+            shift
+            case "$cmd" in
+                code_*) cmd="${cmd#code_}" ;;
+            esac
+            "$cmd" "$@"
             ;;
         bash)
             shift
@@ -34,12 +46,19 @@ if [ $# -gt 0 ]; then
 else
     echo "proma2 Docker container ready."
     echo ""
-    echo "Training commands (inject WANDB_API_KEY for logging):"
+    echo "=== Math benchmarks (GSM8K -> SVAMP OOD val) ==="
     echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 reinforce"
     echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 grpo"
     echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 proma"
     echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 proma_intra"
     echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 proma_intra_eig"
+    echo ""
+    echo "=== Code benchmarks (MBPP -> HumanEval OOD val) ==="
+    echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 code_reinforce"
+    echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 code_grpo"
+    echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 code_proma"
+    echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 code_proma_intra"
+    echo "  docker run --gpus all --shm-size=16g -e WANDB_API_KEY=\$WANDB_API_KEY proma2 code_proma_intra_eig"
     echo ""
     echo "Run arbitrary commands:"
     echo "  docker run --gpus all proma2 python -c 'import verl; print(verl)'"

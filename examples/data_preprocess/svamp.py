@@ -47,7 +47,7 @@ if __name__ == "__main__":
     if args.local_dataset_path:
         dataset = datasets.load_dataset(args.local_dataset_path)
     else:
-        dataset = datasets.load_dataset(data_source, trust_remote_code=True)
+        dataset = datasets.load_dataset(data_source)
 
     # SVAMP has train/test splits
     test_dataset = dataset["test"]
