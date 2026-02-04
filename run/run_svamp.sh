@@ -1,5 +1,15 @@
 # https://github.com/volcengine/verl/commit/b75b1f0bf1dbff60f004795eac845446da32a22d
 
+# Data preprocessing:
+#   python examples/data_preprocess/gsm8k.py --local_save_dir ~/data/gsm8k
+#   python examples/data_preprocess/svamp.py --local_save_dir ~/data/svamp
+
+# Validation dataset: svamp (OOD) by default, or gsm8k (in-distribution)
+VAL_DATA=${VAL_DATA:-$HOME/data/svamp/test.parquet}
+
+# Timestamp for unique experiment names (prevents checkpoint overwriting)
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
 # pure means no clipping, i.e. reinforce and not ppo
 pure="actor_rollout_ref.actor.clip_ratio=1e9 actor_rollout_ref.actor.clip_ratio_high=1e9 actor_rollout_ref.actor.clip_ratio_low=1e9 actor_rollout_ref.actor.clip_ratio_c=1e9"
 ppo="actor_rollout_ref.actor.clip_ratio=0.2 actor_rollout_ref.actor.clip_ratio_high=0.2 actor_rollout_ref.actor.clip_ratio_low=0.2 actor_rollout_ref.actor.clip_ratio_c=3"
@@ -11,7 +21,7 @@ run-alg () {
     python3 -m verl.trainer.main_ppo \
         algorithm.adv_estimator=grpo \
         data.train_files=$HOME/data/gsm8k/train.parquet \
-        data.val_files=$HOME/data/gsm8k/test.parquet \
+        data.val_files=$VAL_DATA \
         data.train_batch_size=128 \
         data.max_prompt_length=512 \
         data.max_response_length=2048 \
@@ -64,11 +74,14 @@ run-alg () {
         "$@"
 }
 
-reinforce () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.experiment_name=reinforce "$@"; }
-grpo () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False $ppo trainer.experiment_name=grpo "$@"; }
-proma () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 +actor_rollout_ref.actor.proma_relative_bound=0.5 trainer.experiment_name=proma "$@"; }
-proma_intra () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_use_same=False +actor_rollout_ref.actor.proma_intra_from_accumulated=False +actor_rollout_ref.actor.proma_intra_linear_combo=False +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra "$@"; }
-proma_intra_eig () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_eig=True +actor_rollout_ref.actor.proma_intra_eig_iters=1 +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra_eig "$@"; }
+reinforce () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.experiment_name=reinforce_$TIMESTAMP "$@"; }
+grpo () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False $ppo trainer.experiment_name=grpo_$TIMESTAMP "$@"; }
+proma () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 +actor_rollout_ref.actor.proma_relative_bound=0.5 trainer.experiment_name=proma_$TIMESTAMP "$@"; }
+proma_intra () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_use_same=False +actor_rollout_ref.actor.proma_intra_from_accumulated=False +actor_rollout_ref.actor.proma_intra_linear_combo=False +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra_$TIMESTAMP "$@"; }
+proma_intra_eig () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_eig=True +actor_rollout_ref.actor.proma_intra_eig_iters=1 +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra_eig_$TIMESTAMP "$@"; }
 
-
+# GSM8K train -> GSM8K val (in-distribution)
+gsm8k_reinforce () { VAL_DATA=$HOME/data/gsm8k/test.parquet run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.experiment_name=gsm8k-reinforce_$TIMESTAMP "$@"; }
+gsm8k_grpo () { VAL_DATA=$HOME/data/gsm8k/test.parquet run-alg +actor_rollout_ref.actor.use_proma_isopo=False $ppo trainer.experiment_name=gsm8k-grpo_$TIMESTAMP "$@"; }
+gsm8k_proma () { VAL_DATA=$HOME/data/gsm8k/test.parquet run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 +actor_rollout_ref.actor.proma_relative_bound=0.5 trainer.experiment_name=gsm8k-proma_$TIMESTAMP "$@"; }
 
