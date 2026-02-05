@@ -1,5 +1,5 @@
 # Build docker image (run once)
-sudo docker build -f Dockerfile.proma2 -t proma2 .
+# sudo docker build -f Dockerfile.proma2 -t proma2 .
 
 
 # Code benchmark: MBPP train -> HumanEval val (OOD)
