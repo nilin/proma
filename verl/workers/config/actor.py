@@ -129,7 +129,9 @@ class ActorConfig(BaseConfig):
     proma_intra: bool = False
     proma_intra_dim: int = 30
     proma_intra_use_same: bool = False
-    proma_intra_from_accumulated: bool = False
+    proma_intra_to_accumulated: bool = False  # Apply proma_intra to accumulated grad (before adding current microbatch)
+    proma_intra_to_accumulated_after: bool = False  # Apply proma_intra to accumulated grad after adding current microbatch
+    proma_skip_fraction: float = 0.0  # Skip proma for the first fraction of microbatches (e.g., 0.75 skips first 75%)
     proma_intra_linear_combo: bool = False
     proma_intra_shrinkage: float = 1.0
     proma_intra_eig: bool = False  # Use approximate leading eigenvectors of act_in and grad_out

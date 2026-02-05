@@ -111,7 +111,9 @@ class DataParallelPPOActor(BasePPOActor):
         self.proma_intra = self.config.get("proma_intra", False)
         self.proma_intra_dim = self.config.get("proma_intra_dim", 30)
         self.proma_intra_use_same = self.config.get("proma_intra_use_same", False)
-        self.proma_intra_from_accumulated = self.config.get("proma_intra_from_accumulated", False)
+        self.proma_intra_to_accumulated = self.config.get("proma_intra_to_accumulated", False)
+        self.proma_intra_to_accumulated_after = self.config.get("proma_intra_to_accumulated_after", False)
+        self.proma_skip_fraction = self.config.get("proma_skip_fraction", 0.0)
         self.proma_intra_linear_combo = self.config.get("proma_intra_linear_combo", False)
         self.proma_intra_shrinkage = self.config.get("proma_intra_shrinkage", 1.0)
         self.proma_intra_eig = self.config.get("proma_intra_eig", False)
@@ -238,13 +240,30 @@ class DataParallelPPOActor(BasePPOActor):
                             grad += scaling * seq_grad 
 
                 if self.proma_intra:
+                    # Check if we should skip proma_intra for this microbatch
+                    skip_proma_intra = (
+                        self.proma_skip_fraction > 0.0 and
+                        hasattr(self, 'current_microbatch_idx') and
+                        hasattr(self, 'total_microbatches') and
+                        self.current_microbatch_idx < self.total_microbatches * self.proma_skip_fraction
+                    )
+
                     # Choose which gradient to project from
-                    if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                    if self.proma_intra_to_accumulated_after:
+                        # First accumulate current grad, then project from result
+                        if hasattr(mod, "suppo_grad"):
+                            mod.suppo_grad = mod.suppo_grad + grad
+                        else:
+                            mod.suppo_grad = grad.clone()
+                        G = mod.suppo_grad
+                    elif self.proma_intra_to_accumulated and hasattr(mod, "suppo_grad"):
                         G = mod.suppo_grad
                     else:
                         G = grad
 
-                    if self.proma_intra_eig:
+                    if skip_proma_intra:
+                        pass  # Skip projection, just accumulate
+                    elif self.proma_intra_eig:
                         # Use approximate leading eigenvectors of act_in and grad_out
                         k = min(self.proma_intra_dim, act_in.shape[0], act_in.shape[1], g_out.shape[1])
                         n = act_in.shape[0]
@@ -276,7 +295,7 @@ class DataParallelPPOActor(BasePPOActor):
                             projection = (Q_g @ (Q_g.T @ G_f @ Q_a) @ Q_a.T).to(grad.dtype)  # (d_out, d_in)
 
                             # Project out from the appropriate gradient
-                            if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                            if self.proma_intra_to_accumulated_after or (self.proma_intra_to_accumulated and hasattr(mod, "suppo_grad")):
                                 norm_before = torch.norm(mod.suppo_grad).item()
                                 mod.suppo_grad = mod.suppo_grad - self.proma_intra_shrinkage * projection
                                 norm_after = torch.norm(mod.suppo_grad).item()
@@ -330,7 +349,7 @@ class DataParallelPPOActor(BasePPOActor):
                             projection = g_sampled.T @ (alpha[:, None] * a_sampled)  # (d_out, d_in)
 
                             # Project out from the appropriate gradient
-                            if self.proma_intra_from_accumulated and hasattr(mod, "suppo_grad"):
+                            if self.proma_intra_to_accumulated_after or (self.proma_intra_to_accumulated and hasattr(mod, "suppo_grad")):
                                 norm_before = torch.norm(mod.suppo_grad).item()
                                 mod.suppo_grad = mod.suppo_grad - self.proma_intra_shrinkage * projection
                                 norm_after = torch.norm(mod.suppo_grad).item()
@@ -350,8 +369,16 @@ class DataParallelPPOActor(BasePPOActor):
                         suppo_grad = grad
                         mod.suppo_grad = grad
 
-                    # Only do proma operations if suppo_grad is a tensor
-                    if self.proma_shrinkage > 0.0 and isinstance(suppo_grad, torch.Tensor):
+                    # Check if we should skip proma for this microbatch
+                    skip_proma = (
+                        self.proma_skip_fraction > 0.0 and
+                        hasattr(self, 'current_microbatch_idx') and
+                        hasattr(self, 'total_microbatches') and
+                        self.current_microbatch_idx < self.total_microbatches * self.proma_skip_fraction
+                    )
+
+                    # Only do proma operations if suppo_grad is a tensor and not skipping
+                    if self.proma_shrinkage > 0.0 and isinstance(suppo_grad, torch.Tensor) and not skip_proma:
                         # Vectorized: compute norms and normalize seq_grads_stacked
                         # seq_grads_stacked: (num_seqs, d_out, d_in)
                         seq_norms = torch.norm(seq_grads_stacked.view(num_seqs, -1), dim=1, keepdim=True)  # (num_seqs, 1)
@@ -392,15 +419,24 @@ class DataParallelPPOActor(BasePPOActor):
                         pct_reduction_proma = 100.0 * (norm_before_proma - norm_after_proma) / (norm_before_proma + 1e-8)
                         self.proma_reductions.append(pct_reduction_proma)
 
-                        mod.suppo_grad = suppo_grad_after_proma + grad
+                        # Don't add grad again if proma_intra_to_accumulated_after already added it
+                        if self.proma_intra and self.proma_intra_to_accumulated_after:
+                            mod.suppo_grad = suppo_grad_after_proma
+                        else:
+                            mod.suppo_grad = suppo_grad_after_proma + grad
 
                     # else no proma
                     else:
-                        mod.suppo_grad = suppo_grad + grad
+                        # Don't add grad again if proma_intra_to_accumulated_after already added it
+                        if self.proma_intra and self.proma_intra_to_accumulated_after:
+                            pass  # suppo_grad already contains grad from proma_intra section
+                        else:
+                            mod.suppo_grad = suppo_grad + grad
 
-                # else first microbatch
+                # else first microbatch (only if proma_intra_to_accumulated_after didn't already initialize it)
                 else:
-                    mod.suppo_grad = grad
+                    if not (self.proma_intra and self.proma_intra_to_accumulated_after):
+                        mod.suppo_grad = grad
 
 
             if self.testing and i in [8,16,32,64,128]:
@@ -894,6 +930,10 @@ class DataParallelPPOActor(BasePPOActor):
                 self.actor_optimizer.zero_grad()
 
                 for mcb_idx, micro_batch in enumerate(micro_batches):
+                    # Track microbatch progress for proma_skip_fraction
+                    self.current_microbatch_idx = mcb_idx
+                    self.total_microbatches = len(micro_batches)
+
                     micro_batch = micro_batch.to(get_device_id())
                     micro_batch_metrics = {}
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
