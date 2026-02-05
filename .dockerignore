@@ -1,0 +1,18 @@
+# Large directories - don't copy into image
+checkpoints/
+models/
+wandb/
+outputs/
+tmp/
+dump/
+
+# Build artifacts
+*.whl
+*.egg-info/
+__pycache__/
+*.pyc
+.git/
+
+# IDE/editor
+.vscode/
+.idea/
