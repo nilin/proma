@@ -105,7 +105,6 @@ class DataParallelPPOActor(BasePPOActor):
         self.override_pg_loss = self.config.get("override_pg_loss", False)
         self.isopo_keep_small_invariant = self.config.get("isopo_keep_small_invariant", True)
         self.isopo_nat = self.config.get("isopo_nat", False)
-        self.proma_relative_bound = self.config.get("proma_relative_bound", 0.5)
         self.proma_shrinkage = self.config.get("proma_shrinkage", 0.0) # 1.0 means full proma, 0.0 means no proma
         self.quick_ntk = self.config.get("quick_ntk", False) # use fast Gram-Schmidt approximation instead of full NTK inverse
         self.proma_intra = self.config.get("proma_intra", False)
@@ -408,10 +407,6 @@ class DataParallelPPOActor(BasePPOActor):
                             # result = sum_i weights[i] * seq_grads_normed[i]
                             result_flat = (weights.unsqueeze(1) * seq_grads_normed_flat).sum(dim=0)
                             projected_grad = result_flat.view_as(suppo_grad).to(suppo_grad.dtype)
-
-                        abs_bound = torch.norm(grad) * self.proma_relative_bound
-                        if torch.norm(projected_grad) > abs_bound:
-                            projected_grad = projected_grad * abs_bound / (torch.norm(projected_grad) + 1e-8)
 
                         norm_before_proma = torch.norm(suppo_grad).item()
                         suppo_grad_after_proma = suppo_grad - self.proma_shrinkage * projected_grad

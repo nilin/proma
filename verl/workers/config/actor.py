@@ -124,7 +124,6 @@ class ActorConfig(BaseConfig):
     isopo_nat: bool = False
     quick_ntk: bool = False
     bypass_isopo_scaling: bool = False
-    proma_relative_bound: float = 1.0
     proma_shrinkage: float = 0.0
     proma_intra: bool = False
     proma_intra_dim: int = 30
