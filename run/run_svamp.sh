@@ -77,8 +77,8 @@ run-alg () {
 reinforce () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.experiment_name=reinforce_$TIMESTAMP "$@"; }
 grpo () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False $ppo trainer.experiment_name=grpo_$TIMESTAMP "$@"; }
 proma () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 trainer.experiment_name=proma_$TIMESTAMP "$@"; }
-proma_intra () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_use_same=False +actor_rollout_ref.actor.proma_intra_to_accumulated=False +actor_rollout_ref.actor.proma_intra_linear_combo=False +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra_$TIMESTAMP "$@"; }
-proma_intra_eig () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_eig=True +actor_rollout_ref.actor.proma_intra_eig_iters=1 +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra_eig_$TIMESTAMP "$@"; }
+proma_intra () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=proma_intra_$TIMESTAMP "$@"; }
+proma_both () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=10 +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 +actor_rollout_ref.actor.proma_intra_to_accumulated=True trainer.experiment_name=proma_both_$TIMESTAMP "$@"; }
 
 # GSM8K train -> GSM8K val (in-distribution)
 gsm8k_reinforce () { VAL_DATA=$HOME/data/gsm8k/test.parquet run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.experiment_name=gsm8k-reinforce_$TIMESTAMP "$@"; }
