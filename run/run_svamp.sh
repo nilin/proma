@@ -63,7 +63,7 @@ run-alg () {
         trainer.save_freq=20 \
         trainer.test_freq=10 \
         trainer.total_epochs=20 \
-        trainer.total_training_steps=100 \
+        trainer.total_training_steps=52 \
         trainer.resume_mode=disable \
         trainer.val_before_train=True \
         actor_rollout_ref.actor.optim.lr=2e-6 \
