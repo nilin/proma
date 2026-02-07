@@ -1,5 +1,6 @@
 # Build docker image (run once)
 # sudo docker build -f Dockerfile.proma2 -t proma2 .
+# sudo docker run --rm -v /home/ubuntu/proma2:/app proma2 huggingface-cli download Qwen/Qwen3-0.6B --local-dir /app/models/Qwen3-0.6B
 
 
 for q in 0 1 2; do
@@ -37,7 +38,7 @@ sudo docker run --rm --gpus all --shm-size=16g \
         ++actor_rollout_ref.actor.proma_intra_to_accumulated=False \
         ++actor_rollout_ref.actor.proma_intra_to_accumulated_after=False \
         ++actor_rollout_ref.actor.proma_skip_fraction=0.0 \
-        ++actor_rollout_ref.actor.proma_intra_dim=10 
+        ++actor_rollout_ref.actor.proma_intra_dim=25
 
 sudo fuser -k /dev/nvidia* 2>/dev/null || true
 
@@ -54,7 +55,7 @@ sudo docker run --rm --gpus all --shm-size=16g \
     proma2 code_proma_both \
         ++actor_rollout_ref.actor.optim.lr=$LR \
         ++actor_rollout_ref.actor.proma_skip_fraction=0.001 \
-        ++actor_rollout_ref.actor.proma_intra_dim=10
+        ++actor_rollout_ref.actor.proma_intra_dim=25
 
 sudo fuser -k /dev/nvidia* 2>/dev/null || true
 
