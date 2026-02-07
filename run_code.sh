@@ -16,7 +16,6 @@ sudo docker run --rm --gpus all --shm-size=16g \
     proma2 code_proma \
          ++actor_rollout_ref.actor.optim.lr=$LR \
          ++actor_rollout_ref.actor.proma_shrinkage=1.0 \
-         ++actor_rollout_ref.actor.proma_relative_bound=10000 \
          ++actor_rollout_ref.actor.proma_skip_fraction=0.50
 
 sudo fuser -k /dev/nvidia* 2>/dev/null || true

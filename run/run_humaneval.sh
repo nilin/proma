@@ -81,14 +81,14 @@ run-alg () {
 # MBPP train -> HumanEval val (cross-benchmark OOD) - default
 reinforce () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.experiment_name=mbpp-humaneval-reinforce_$TIMESTAMP "$@"; }
 grpo () { run-alg +actor_rollout_ref.actor.use_proma_isopo=False $ppo trainer.experiment_name=mbpp-humaneval-grpo_$TIMESTAMP "$@"; }
-proma () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 +actor_rollout_ref.actor.proma_relative_bound=0.5 trainer.experiment_name=mbpp-humaneval-proma_$TIMESTAMP "$@"; }
+proma () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 trainer.experiment_name=mbpp-humaneval-proma_$TIMESTAMP "$@"; }
 proma_intra () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_use_same=False +actor_rollout_ref.actor.proma_intra_to_accumulated=False +actor_rollout_ref.actor.proma_intra_linear_combo=False +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=mbpp-humaneval-proma_intra_$TIMESTAMP "$@"; }
 proma_intra_eig () { run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_intra=True +actor_rollout_ref.actor.proma_intra_dim=100 +actor_rollout_ref.actor.proma_intra_eig=True +actor_rollout_ref.actor.proma_intra_eig_iters=1 +actor_rollout_ref.actor.proma_intra_shrinkage=1.0 trainer.experiment_name=mbpp-humaneval-proma_intra_eig_$TIMESTAMP "$@"; }
 
 # HumanEval train -> HumanEval val (in-distribution)
 humaneval_reinforce () { TRAIN_DATA=$HOME/data/humaneval/train.parquet VAL_DATA=$HOME/data/humaneval/test.parquet run-alg +actor_rollout_ref.actor.use_proma_isopo=False trainer.experiment_name=humaneval-reinforce_$TIMESTAMP "$@"; }
 humaneval_grpo () { TRAIN_DATA=$HOME/data/humaneval/train.parquet VAL_DATA=$HOME/data/humaneval/test.parquet run-alg +actor_rollout_ref.actor.use_proma_isopo=False $ppo trainer.experiment_name=humaneval-grpo_$TIMESTAMP "$@"; }
-humaneval_proma () { TRAIN_DATA=$HOME/data/humaneval/train.parquet VAL_DATA=$HOME/data/humaneval/test.parquet run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 +actor_rollout_ref.actor.proma_relative_bound=0.5 trainer.experiment_name=humaneval-proma_$TIMESTAMP "$@"; }
+humaneval_proma () { TRAIN_DATA=$HOME/data/humaneval/train.parquet VAL_DATA=$HOME/data/humaneval/test.parquet run-alg +actor_rollout_ref.actor.use_proma_isopo=True +actor_rollout_ref.actor.proma_shrinkage=1.0 trainer.experiment_name=humaneval-proma_$TIMESTAMP "$@"; }
 
 # Quick test run with smaller batches
 test_run () { run-alg $test trainer.experiment_name=code-test_$TIMESTAMP "$@"; }
