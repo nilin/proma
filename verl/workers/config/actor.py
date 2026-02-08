@@ -132,6 +132,7 @@ class ActorConfig(BaseConfig):
     proma_skip_fraction: float = 0.0  # Skip proma for the first fraction of microbatches (e.g., 0.75 skips first 75%)
     proma_intra_shrinkage: float = 1.0
     proma_intra_eig_iters: int = 1  # Number of power iterations for approximate eigenvectors
+    proma_intra_sv_shrink: bool = False  # SV-weighted shrinkage on final accumulated grad
     override_pg_loss: bool = False
     ppo_epochs: int = 1
     shuffle: bool = False

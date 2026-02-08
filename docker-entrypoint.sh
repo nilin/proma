@@ -20,12 +20,12 @@ if [ $# -gt 0 ]; then
     # Check if first argument is a training function
     case "$1" in
         # Math benchmarks (GSM8K train -> SVAMP/GSM8K val)
-        reinforce|grpo|proma|proma_intra|proma_intra_acc|proma_both|gsm8k_reinforce|gsm8k_grpo|gsm8k_proma)
+        reinforce|grpo|proma|proma_intra|proma_intra_acc|proma_both|proma_sv_shrink|gsm8k_reinforce|gsm8k_grpo|gsm8k_proma)
             source run/run_svamp.sh
             "$@"
             ;;
         # Code benchmarks (MBPP train -> HumanEval val)
-        code_reinforce|code_grpo|code_proma|code_proma_intra|code_proma_intra_acc|code_proma_both|humaneval_reinforce|humaneval_grpo|humaneval_proma|test_run)
+        code_reinforce|code_grpo|code_proma|code_proma_intra|code_proma_intra_acc|code_proma_both|code_proma_sv_shrink|humaneval_reinforce|humaneval_grpo|humaneval_proma|test_run)
             source run/run_humaneval.sh
             # Strip "code_" prefix if present
             cmd="$1"

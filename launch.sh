@@ -61,6 +61,22 @@ sudo fuser -k /dev/nvidia* 2>/dev/null || true
 source next.sh
 
 
+# proma sv shrink
+
+# Code benchmark: MBPP train -> HumanEval val (OOD)
+sudo docker run --rm --gpus all --shm-size=16g \
+    -v /home/ubuntu/proma2:/app \
+    -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
+    -e WANDB_API_KEY=$WANDB_API_KEY \
+    proma2 code_proma_sv_shrink \
+        ++actor_rollout_ref.actor.optim.lr=$LR \
+        ++actor_rollout_ref.actor.proma_intra_dim=25
+
+sudo fuser -k /dev/nvidia* 2>/dev/null || true
+
+source next.sh
+
+
 # Code benchmark: MBPP train -> HumanEval val (OOD)
 sudo docker run --rm --gpus all --shm-size=16g \
     -v /home/ubuntu/proma2:/app \

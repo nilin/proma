@@ -114,6 +114,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.proma_skip_fraction = self.config.get("proma_skip_fraction", 0.0)
         self.proma_intra_shrinkage = self.config.get("proma_intra_shrinkage", 1.0)
         self.proma_intra_eig_iters = self.config.get("proma_intra_eig_iters", 1)
+        self.proma_intra_sv_shrink = self.config.get("proma_intra_sv_shrink", False)
 
         self.bypass_isopo_scaling = self.config.get("bypass_isopo_scaling", False)
 
@@ -131,6 +132,9 @@ class DataParallelPPOActor(BasePPOActor):
         self.done_tests = set()
         self.proma_intra_reductions = []
         self.proma_reductions = []
+        self.sv_shrink_sv_a = []  # top-k singular values of act_in
+        self.sv_shrink_sv_g = []  # top-k singular values of g_out
+        self.sv_shrink_reductions = []
 
     #########################################################
 
@@ -375,6 +379,58 @@ class DataParallelPPOActor(BasePPOActor):
                 else:
                     if not (self.proma_intra and self.proma_intra_to_accumulated_after):
                         mod.suppo_grad = grad
+
+                # Singular-value-weighted shrinkage on the final accumulated grad
+                if (self.proma_intra_sv_shrink and
+                    hasattr(self, 'current_microbatch_idx') and
+                    hasattr(self, 'total_microbatches') and
+                    self.current_microbatch_idx == self.total_microbatches - 1 and
+                    hasattr(mod, 'suppo_grad') and
+                    isinstance(mod.suppo_grad, torch.Tensor)):
+
+                    k = min(self.proma_intra_dim, act_in.shape[0], act_in.shape[1], g_out.shape[1])
+                    n = act_in.shape[0]
+                    act_in_f = act_in.float()
+                    g_out_f = g_out.float()
+
+                    # Approximate top-k right singular subspace of act_in
+                    omega_a = torch.randn(n, k, device=act_in.device, dtype=torch.float32)
+                    Y_a = act_in_f.T @ omega_a
+                    for _ in range(self.proma_intra_eig_iters):
+                        Y_a = act_in_f.T @ (act_in_f @ Y_a)
+                    Q_a, _ = torch.linalg.qr(Y_a)  # (d_in, k)
+
+                    # Extract individual singular vectors and values
+                    B_a = act_in_f @ Q_a  # (n, k)
+                    _, S_a, Vt_a = torch.linalg.svd(B_a, full_matrices=False)  # S_a: (k,), Vt_a: (k, k)
+                    V_a = Q_a @ Vt_a.T  # (d_in, k) — actual right singular vectors
+                    w_a = 1.0 - S_a[-1] / (S_a + 1e-8)  # (k,) — weight 0 for smallest, approaching 1 for largest
+
+                    # Approximate top-k left singular subspace of g_out
+                    omega_g = torch.randn(n, k, device=g_out.device, dtype=torch.float32)
+                    Y_g = g_out_f.T @ omega_g
+                    for _ in range(self.proma_intra_eig_iters):
+                        Y_g = g_out_f.T @ (g_out_f @ Y_g)
+                    Q_g, _ = torch.linalg.qr(Y_g)  # (d_out, k)
+
+                    B_g = g_out_f @ Q_g  # (n, k)
+                    _, S_g, Vt_g = torch.linalg.svd(B_g, full_matrices=False)
+                    V_g = Q_g @ Vt_g.T  # (d_out, k) — actual left singular vectors
+                    w_g = 1.0 - S_g[-1] / (S_g + 1e-8)
+
+                    # Weighted projection: V_g @ diag(w_g) @ V_g^T @ G @ V_a @ diag(w_a) @ V_a^T
+                    G_acc = mod.suppo_grad.float()
+                    inner = (V_g * w_g).T @ G_acc @ (V_a * w_a)  # (k, k)
+                    projection = (V_g @ inner @ V_a.T).to(mod.suppo_grad.dtype)
+
+                    norm_before = torch.norm(mod.suppo_grad).item()
+                    mod.suppo_grad = mod.suppo_grad - self.proma_intra_shrinkage * projection
+                    norm_after = torch.norm(mod.suppo_grad).item()
+                    pct_reduction = 100.0 * (norm_before - norm_after) / (norm_before + 1e-8)
+                    self.proma_intra_reductions.append(pct_reduction)
+                    self.sv_shrink_reductions.append(pct_reduction)
+                    self.sv_shrink_sv_a.append(S_a.tolist())
+                    self.sv_shrink_sv_g.append(S_g.tolist())
 
 
             if self.testing and i in [8,16,32,64,128]:
@@ -1012,6 +1068,22 @@ class DataParallelPPOActor(BasePPOActor):
                     if self.proma_reductions:
                         metrics["actor/proma_reduction_pct"] = sum(self.proma_reductions) / len(self.proma_reductions)
                         self.proma_reductions.clear()
+                    if self.sv_shrink_reductions:
+                        metrics["actor/sv_shrink_reduction_pct"] = sum(self.sv_shrink_reductions) / len(self.sv_shrink_reductions)
+                        self.sv_shrink_reductions.clear()
+                    if self.sv_shrink_sv_a:
+                        # Average across layers, log top/bottom/ratio of singular values
+                        import numpy as np
+                        avg_sv_a = np.mean(self.sv_shrink_sv_a, axis=0)
+                        avg_sv_g = np.mean(self.sv_shrink_sv_g, axis=0)
+                        metrics["actor/sv_shrink_sv_a_top"] = float(avg_sv_a[0])
+                        metrics["actor/sv_shrink_sv_a_bottom"] = float(avg_sv_a[-1])
+                        metrics["actor/sv_shrink_sv_a_ratio"] = float(avg_sv_a[0] / (avg_sv_a[-1] + 1e-8))
+                        metrics["actor/sv_shrink_sv_g_top"] = float(avg_sv_g[0])
+                        metrics["actor/sv_shrink_sv_g_bottom"] = float(avg_sv_g[-1])
+                        metrics["actor/sv_shrink_sv_g_ratio"] = float(avg_sv_g[0] / (avg_sv_g[-1] + 1e-8))
+                        self.sv_shrink_sv_a.clear()
+                        self.sv_shrink_sv_g.clear()
                 ################################################################################
 
                 grad_norm = self._optimizer_step()
