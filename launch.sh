@@ -6,106 +6,79 @@ sudo fuser -k /dev/nvidia* 2>/dev/null || true
 
 
 
-for q in 0 1 2; do
+### for q in 0 1 2; do
+### 
+### for LR in 5e-6 2e-6; do
+### 
+### 
+### 
+### 
+### # Code benchmark: MBPP train -> HumanEval val (OOD)
+### sudo docker run --rm --gpus all --shm-size=16g \
+###     -v /home/ubuntu/proma2:/app \
+###     -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
+###     -e WANDB_API_KEY=$WANDB_API_KEY \
+###     proma2 code_reinforce \
+###         ++actor_rollout_ref.actor.optim.lr=$LR
+### 
+### sudo fuser -k /dev/nvidia* 2>/dev/null || true
+### 
+### source next.sh
+### 
+### 
+### # Code benchmark: MBPP train -> HumanEval val (OOD)
+### sudo docker run --rm --gpus all --shm-size=16g \
+###     -v /home/ubuntu/proma2:/app \
+###     -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
+###     -e WANDB_API_KEY=$WANDB_API_KEY \
+###     proma2 code_grpo \
+###         ++actor_rollout_ref.actor.optim.lr=$LR
+### 
+### sudo fuser -k /dev/nvidia* 2>/dev/null || true
+### 
+### source next.sh
+### 
+### 
+### done
+### 
+### done
+
 
 for LR in 5e-6 2e-6; do
 
-# proma
+# Best PROMA variants (lr=5e-6 only)
+for q in 0 1; do
 
-# Code benchmark: MBPP train -> HumanEval val (OOD)
+# Best non-intra PROMA: skip=0.5
 sudo docker run --rm --gpus all --shm-size=16g \
     -v /home/ubuntu/proma2:/app \
     -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
     -e WANDB_API_KEY=$WANDB_API_KEY \
     proma2 code_proma \
-         ++actor_rollout_ref.actor.optim.lr=$LR \
-         ++actor_rollout_ref.actor.proma_shrinkage=1.0 \
-         ++actor_rollout_ref.actor.proma_skip_fraction=0.001
-
-sudo fuser -k /dev/nvidia* 2>/dev/null || true
-
-source next.sh
-
-
-# proma intra on accumulated
-
-# Code benchmark: MBPP train -> HumanEval val (OOD)
-sudo docker run --rm --gpus all --shm-size=16g \
-    -v /home/ubuntu/proma2:/app \
-    -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
-    -e WANDB_API_KEY=$WANDB_API_KEY \
-    proma2 code_proma_intra_acc \
         ++actor_rollout_ref.actor.optim.lr=$LR \
-         ++actor_rollout_ref.actor.proma_skip_fraction=0.001 \
-        ++actor_rollout_ref.actor.proma_intra_dim=25
+        +actor_rollout_ref.actor.proma_skip_fraction=0.5
 
 sudo fuser -k /dev/nvidia* 2>/dev/null || true
 
 source next.sh
-
-
-# proma both (intra + sequence-wise)
-
-# Code benchmark: MBPP train -> HumanEval val (OOD)
-sudo docker run --rm --gpus all --shm-size=16g \
-    -v /home/ubuntu/proma2:/app \
-    -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
-    -e WANDB_API_KEY=$WANDB_API_KEY \
-    proma2 code_proma_both \
-        ++actor_rollout_ref.actor.optim.lr=$LR \
-        ++actor_rollout_ref.actor.proma_skip_fraction=0.001 \
-        ++actor_rollout_ref.actor.proma_intra_dim=25
-
-sudo fuser -k /dev/nvidia* 2>/dev/null || true
-
-source next.sh
-
-
-# proma sv shrink
-
-# Code benchmark: MBPP train -> HumanEval val (OOD)
-sudo docker run --rm --gpus all --shm-size=16g \
-    -v /home/ubuntu/proma2:/app \
-    -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
-    -e WANDB_API_KEY=$WANDB_API_KEY \
-    proma2 code_proma_sv_shrink \
-        ++actor_rollout_ref.actor.optim.lr=$LR \
-        ++actor_rollout_ref.actor.proma_intra_dim=25
-
-sudo fuser -k /dev/nvidia* 2>/dev/null || true
-
-source next.sh
-
-
-# Code benchmark: MBPP train -> HumanEval val (OOD)
-sudo docker run --rm --gpus all --shm-size=16g \
-    -v /home/ubuntu/proma2:/app \
-    -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
-    -e WANDB_API_KEY=$WANDB_API_KEY \
-    proma2 code_reinforce \
-        ++actor_rollout_ref.actor.optim.lr=$LR
-
-sudo fuser -k /dev/nvidia* 2>/dev/null || true
-
-source next.sh
-
-
-# Code benchmark: MBPP train -> HumanEval val (OOD)
-sudo docker run --rm --gpus all --shm-size=16g \
-    -v /home/ubuntu/proma2:/app \
-    -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
-    -e WANDB_API_KEY=$WANDB_API_KEY \
-    proma2 code_grpo \
-        ++actor_rollout_ref.actor.optim.lr=$LR
-
-sudo fuser -k /dev/nvidia* 2>/dev/null || true
-
-source next.sh
-
 
 done
 
 done
+
+
+### # Best PROMA intra: d=10, ishr=1
+### sudo docker run --rm --gpus all --shm-size=16g \
+###     -v /home/ubuntu/proma2:/app \
+###     -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
+###     -e WANDB_API_KEY=$WANDB_API_KEY \
+###     proma2 code_proma_intra \
+###         ++actor_rollout_ref.actor.optim.lr=5e-6 \
+###         ++actor_rollout_ref.actor.proma_intra_dim=10
+### 
+### sudo fuser -k /dev/nvidia* 2>/dev/null || true
+### 
+### source next.sh
 
 
 
