@@ -53,6 +53,7 @@ for LR in 5e-6 2e-6; do
         -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
         -e WANDB_API_KEY=$WANDB_API_KEY \
         proma2 code_proma_intra \
+            ++trainer.total_training_steps=22 \
             ++actor_rollout_ref.actor.optim.lr=$LR \
             ++actor_rollout_ref.actor.proma_intra_dim=10
     
