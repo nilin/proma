@@ -20,6 +20,20 @@ for q in 1 2 3; do
   sudo fuser -k /dev/nvidia* 2>/dev/null || true
   source next.sh
 
+  # PROMA intra: d=25, ishr=0.9, no skip
+  sudo docker run --rm --gpus all --shm-size=16g \
+  -v /home/ubuntu/proma2:/app \
+  -v /home/ubuntu/proma2/checkpoints:/app/checkpoints \
+  -e WANDB_API_KEY=$WANDB_API_KEY \
+  proma2 code_proma_intra \
+      ++trainer.total_training_steps=22 \
+      ++actor_rollout_ref.actor.optim.lr=$LR \
+      ++actor_rollout_ref.actor.proma_intra_dim=20 \
+      ++actor_rollout_ref.actor.proma_intra_shrinkage=0.9
+
+  sudo fuser -k /dev/nvidia* 2>/dev/null || true
+  source next.sh
+
   # Best non-intra PROMA: skip=0.5
   sudo docker run --rm --gpus all --shm-size=16g \
       -v /home/ubuntu/proma2:/app \
