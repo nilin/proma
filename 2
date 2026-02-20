@@ -1,9 +1,0 @@
-  
-#sudo docker build -f Dockerfile.proma2 -t proma2 .                                                                                                                        
-sudo docker run --gpus all --shm-size=16g -e WANDB_API_KEY=$WANDB_API_KEY proma2 proma_intra_eig +actor_rollout_ref.actor.proma_shrinkage=1.0 ++trainer.experiment_name=proma_intra_eig_both-lr5 ++actor_rollout_ref.actor.optim.lr=5e-6 ++trainer.total_training_steps=102
-sudo docker run --gpus all --shm-size=16g -e WANDB_API_KEY=$WANDB_API_KEY proma2 proma_intra_eig +actor_rollout_ref.actor.proma_shrinkage=1.0 ++trainer.experiment_name=proma_intra_eig_both-lr10 ++actor_rollout_ref.actor.optim.lr=10e-6 ++trainer.total_training_steps=102
-sudo docker run --gpus all --shm-size=16g -e WANDB_API_KEY=$WANDB_API_KEY proma2 proma_intra_eig +actor_rollout_ref.actor.proma_shrinkage=1.0 ++trainer.experiment_name=proma_intra_eig_both-lr2 ++actor_rollout_ref.actor.optim.lr=2e-6 ++trainer.total_training_steps=102
-
-
-
-
