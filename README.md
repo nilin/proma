@@ -7,7 +7,7 @@ This repo contains a demonstration of the Projected Microbatch Accumulation (PRO
 
 This demonstration is a fork of [VeRL](https://github.com/volcengine/verl).
 
-Projected Microbatch Accumulation (PROMA) is a proximal policy update method for large language model fine-tuning. PROMA accumulates policy gradients across microbatches by projecting out sequence-wise gradient components before microbatch aggregation. The projection is applied layer-wise during the backward pass, enabling efficient implementation without additional forward or backward passes. Empirically, PROMA enforces tighter control of local KL divergence than GRPO, resulting in more stable policy learning. Unlike PPO and GRPO, PROMA achieves proximal updates without inducing entropy collapse and does not rely on a reference policy or likelihood-ratio clipping.
+Projected Microbatch Accumulation (PROMA) is a reference-free proximal policy method that controls KL divergence by projecting away high-variance components of the policy gradient. Two variants are presented. In the accumulation-based variant, the running gradient is projected orthogonal to the sequence-wise log-probability gradients of each microbatch. In the intra-microbatch variant, a factored projection using dominant subspaces of activations and gradient outputs is applied independently within each microbatch, making it compatible with standard data-parallel training. Empirically, the accumulation variant achieves tighter per-step KL control than GRPO with PPO clipping, while the intra-microbatch variant achieves the best validation performance.
 
 
 The implementation of PROMA (and [ISOPO](https://arxiv.org/abs/2512.23353)) are in https://github.com/nilin/isopo/blob/main/verl/workers/actor/dp_actor.py
