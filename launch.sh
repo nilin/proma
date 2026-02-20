@@ -1,6 +1,6 @@
 # Build docker image (run once)
-# sudo docker build -f Dockerfile.proma2 -t proma2 .
-# sudo docker run --rm -v /home/ubuntu/proma2:/app proma2 huggingface-cli download Qwen/Qwen3-0.6B --local-dir /app/models/Qwen3-0.6B
+sudo docker build -f Dockerfile.proma2 -t proma2 .
+sudo docker run --rm -v /home/ubuntu/proma2:/app proma2 huggingface-cli download Qwen/Qwen3-0.6B --local-dir /app/models/Qwen3-0.6B
 
 sudo fuser -k /dev/nvidia* 2>/dev/null || true
 
