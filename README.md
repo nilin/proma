@@ -12,5 +12,4 @@ Projected Microbatch Accumulation (PROMA) is a proximal policy update method for
 
 The implementation of PROMA (and [ISOPO](https://arxiv.org/abs/2512.23353)) are in https://github.com/nilin/isopo/blob/main/verl/workers/actor/dp_actor.py
 
-- [setup example](setup.sh)
-- [run script example](run/run.sh)
+- [launch using docker](launch.sh)
